@@ -23,6 +23,13 @@ var Os = require('os');
 var SYSTEM = process.platform;
 var CROSS = process.env['CROSS'] || '';
 var GCC = process.env['CC'] || 'gcc';
+var CFLAGS = process.env['CFLAGS'] || '';
+var LDFLAGS = process.env['LDFLAGS'] || '';
+
+console.log("CROSS: " + CROSS);
+console.log("GCC: " + GCC);
+console.log("CFLAGS: " + CFLAGS);
+console.log("LDFLAGS: " + LDFLAGS);
 
 var BUILDDIR = process.env['BUILDDIR'];
 if (BUILDDIR === undefined) {
@@ -49,43 +56,11 @@ Builder.configure({
 
     builder.config.tempDir = '/tmp';
     builder.config.useTempFiles = true;
-    builder.config.cflags.push(
-        '-std=c99',
-        '-Wall',
-        '-Wextra',
-        '-Werror',
-        '-Wno-pointer-sign',
-        '-pedantic',
-        '-D',builder.config.systemName + '=1',
-        '-Wno-unused-parameter',
-        '-Wno-unused-result',
+    // TODO evaluate if CFLAGS is passed in, else default what was ripped out.
+    var CFLAGS = process.env['CFLAGS'] || '';
+    builder.config.cflags.push(CFLAGS);
 
-        // Broken GCC patch makes -fstack-protector-all not work
-        // workaround is to give -fno-stack-protector first.
-        // see: https://bugs.launchpad.net/ubuntu/+source/gcc-4.5/+bug/691722
-        '-fno-stack-protector',
-        '-fstack-protector-all',
-        '-Wstack-protector',
-
-        '-D','HAS_BUILTIN_CONSTANT_P',
-
-        '-g',
-
-//        '-flto', not available on some  machines
-
-        // f4 = 16 peers max, fixed width 4 bit
-        // f8 = 241 peers max, fixed width 8 bit
-        // v3x5x8 = 256 peers max, variable width, 3, 5 or 8 bits plus 1 or 2 bits of prefix
-        // v4x8 = 256 peers max, variable width, 4, or 8 bits plus 1 bit prefix
-        '-D',' NumberCompress_TYPE=v4x8',
-
-        // disable for speed, enable for safety
-        '-D','Log_DEBUG',
-        '-D','Identity_CHECK=1',
-        '-D','Allocator_USE_CANARIES=1',
-        '-D','PARANOIA=1'
-    );
-    if (process.env['NO_PIE'] === undefined) {
+  if (process.env['NO_PIE'] === undefined) {
         builder.config.cflags.push('-fPIE');
     }
     if (process.env['EXPERIMENTAL_PATHFINDER']) {

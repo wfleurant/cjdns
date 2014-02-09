@@ -58,7 +58,13 @@ var error = function (message)
 var sema = Semaphore.create(WORKERS);
 var compiler = function (compilerPath, args, callback, content) {
     sema.take(function (returnAfter) {
-        var gcc = Spawn(compilerPath, args);
+
+	var cflags = process.env['CFLAGS'] || '';
+	var ldflags = process.env['LDFLAGS'] || '';
+
+	// The gcc object bangs out ./contrib/c/ -- feed it a toolchain
+	// TODO: complete the path to openwrt toolchain
+	var gcc = Spawn(process.env['CC'], args);
         var err = '';
         var out = '';
         gcc.stdout.on('data', function(dat) { out += dat.toString(); });
