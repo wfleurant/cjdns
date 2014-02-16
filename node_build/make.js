@@ -58,7 +58,53 @@ Builder.configure({
     builder.config.useTempFiles = true;
     // TODO evaluate if CFLAGS is passed in, else default what was ripped out.
     var CFLAGS = process.env['CFLAGS'] || '';
-    builder.config.cflags.push(CFLAGS);
+    // push OpenWRT CFLAGS to our flags array
+    var arrayOfStrings = CFLAGS.split(" ");
+    for (var i=0; i < arrayOfStrings.length; i++) {
+        builder.config.cflags.push(arrayOfStrings[i]);
+    };
+    // push "standard" cflags to our flags array
+    builder.config.cflags.push(
+        '-std=c99',
+        '-Wall',
+        '-Wextra',
+        // '-Werror', // yikes
+        '-Wuninitialized',
+        '-Wunused',
+        '-Wno-pointer-sign',
+        '-pedantic',
+        '-D',builder.config.systemName + '=1',
+        '-Wno-unused-parameter',
+        '-Wno-unused-result',
+
+        // Broken GCC patch makes -fstack-protector-all not work
+        // workaround is to give -fno-stack-protector first.
+        // see: https://bugs.launchpad.net/ubuntu/+source/gcc-4.5/+bug/691722
+        // '-fno-stack-protector',  // please be advised
+        // '-fstack-protector-all', // please be advised
+        '-Wstack-protector',
+
+        '-D','HAS_BUILTIN_CONSTANT_P',
+
+        '-g',
+
+        //        '-flto', not available on some  machines
+
+        // f4 = 16 peers max, fixed width 4 bit
+        // f8 = 241 peers max, fixed width 8 bit
+        // v3x5x8 = 256 peers max, variable width, 3, 5 or 8 bits plus 1 or 2 bits of prefix
+        // v4x8 = 256 peers max, variable width, 4, or 8 bits plus 1 bit prefix
+        '-D',' NumberCompress_TYPE=v4x8'
+
+        // All vars passed in below work, but this is need for speed:
+        // `-> https://ezcrypt.it/KZ7n#JtLzL131JvqkdGgL8EHGk1FE
+
+        // disable for speed, enable for safety
+        // '-D','Log_DEBUG',
+        // '-D','Identity_CHECK=1',
+        // '-D','Allocator_USE_CANARIES=1',
+        // '-D','PARANOIA=1'
+  );
 
   if (process.env['NO_PIE'] === undefined) {
         builder.config.cflags.push('-fPIE');

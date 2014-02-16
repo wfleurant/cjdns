@@ -59,24 +59,26 @@ var sema = Semaphore.create(WORKERS);
 var compiler = function (compilerPath, args, callback, content) {
     sema.take(function (returnAfter) {
 
-	var cflags = process.env['CFLAGS'] || '';
-	var ldflags = process.env['LDFLAGS'] || '';
+        // investigate further if we split/splice ldflags
+        var ldflags = process.env['LDFLAGS'] || '';
 
-	// The gcc object bangs out ./contrib/c/ -- feed it a toolchain
-	// TODO: complete the path to openwrt toolchain
-	var gcc = Spawn(process.env['CC'], args);
+        var gcc = Spawn(process.env['CC'], args);
+
         var err = '';
         var out = '';
         gcc.stdout.on('data', function(dat) { out += dat.toString(); });
         gcc.stderr.on('data', function(dat) { err += dat.toString(); });
+
         gcc.on('close', returnAfter(function(ret) {
             callback(ret, out, err);
         }));
+
         gcc.on('error', function(err) {
-          // handle the error safely
-          console.log(args);
-          console.log(err);
+            // handle the error safely
+            console.log(args);
+            console.log(err);
         });
+
         if (content) {
             gcc.stdin.write(content, function (err) {
                 if (err) { throw err; }
@@ -89,7 +91,8 @@ var compiler = function (compilerPath, args, callback, content) {
 var cc = function (gcc, args, callback, content) {
     compiler(gcc, args, function (ret, out, err) {
         if (ret) {
-            callback(error("gcc " + args.join(' ') + "\n\n" + err));
+            console.log("Actual GCC: " + gcc);
+            callback(error("'gcc'" + "  " + args.join(' ') + "\n\n" + err));
         }
         if (err !== '') {
             debug(err);
@@ -285,6 +288,7 @@ var compileFile = function (fileName, builder, tempDir, callback)
     var outFile = state.buildDir+'/'+getObjectFile(fileName);
     var fileContent;
     var fileObj = getFile();
+
     nThen(function (waitFor) {
         (function() {
             //debug("CPP -MM");
@@ -298,8 +302,6 @@ var compileFile = function (fileName, builder, tempDir, callback)
                 // first 2 entries are crap
                 output.splice(0,2);
                 for (var i = output.length-1; i >= 0; i--) {
-                    //console.log('Removing empty dependency [' +
-                    //    state.gcc + ' ' + flags.join(' ') + ']');
                     if (output[i] === '') {
                         output.splice(i,1);
                     }
