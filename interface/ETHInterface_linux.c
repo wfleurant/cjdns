@@ -89,7 +89,8 @@ static uint8_t sendMessage(struct Message* message, struct Interface* ethIf)
 
     struct sockaddr_ll addr;
     Bits_memcpyConst(&addr, &context->addrBase, sizeof(struct sockaddr_ll));
-    Message_pop(message, addr.sll_addr, 8, NULL);
+    Message_pop(message, addr.sll_addr, 6, NULL);
+    Message_shift(message, -2, NULL);
 
     /* Cut down on the noise
     uint8_t buff[sizeof(addr) * 2 + 1] = {0};
@@ -241,12 +242,10 @@ static void handleEvent2(struct ETHInterface* context, struct Allocator* message
     //Assert_true(addrLen == SOCKADDR_LL_LEN);
 
     // Pop the first 2 bytes of the message containing the node id and amount of padding.
-    uint16_t idAndPadding_be;
-    Message_pop(msg, &idAndPadding_be, 2, NULL);
-
-    const uint16_t idAndPadding = Endian_bigEndianToHost16(idAndPadding_be);
+    uint16_t idAndPadding = Message_pop16(msg, NULL);
     msg->length = rc - 2 - ((idAndPadding & 7) * 8);
-    const uint16_t id = idAndPadding >> 3;
+    uint16_t id = idAndPadding >> 3;
+
     Message_push(msg, &id, 2, NULL);
     Message_push(msg, addr.sll_addr, 6, NULL);
 
@@ -376,7 +375,8 @@ struct ETHInterface* ETHInterface_new(struct EventBase* base,
 
     Event_socketRead(handleEvent, context, context->socket, base, allocator, exHandler);
 
-    context->multiIface = MultiInterface_new(sizeof(struct sockaddr_ll), &context->generic, ic);
+    // size of key is 8, 6 for mac + 2 for id.
+    context->multiIface = MultiInterface_new(8, &context->generic, ic, logger);
 
     Timeout_setInterval(sendBeacon, context, BEACON_INTERVAL, base, allocator);
 
