@@ -59,10 +59,8 @@ var sema = Semaphore.create(WORKERS);
 var compiler = function (compilerPath, args, callback, content) {
     sema.take(function (returnAfter) {
 
-        // investigate further if we split/splice ldflags
-        var ldflags = process.env['LDFLAGS'] || '';
-
-        var gcc = Spawn(process.env['CC'], args);
+        // flags splitting now done for libuv and BBB @ 480d69d7
+        var gcc = Spawn(compilerPath, args);
 
         var err = '';
         var out = '';
