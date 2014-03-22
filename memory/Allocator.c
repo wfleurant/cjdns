@@ -35,11 +35,12 @@ static void writeUnroller(const struct Unroller* unroller)
         fprintf(stderr, "%s", unroller->content);
     }
 }
-static void unroll(struct Allocator_pvt* context, struct Unroller* unroller)
+static void unroll(struct Allocator_pvt* context,
+                   int includeAllocations,
+                   struct Unroller* unroller)
 {
     writeUnroller(unroller);
-    const char* ident = (context->pub.fileName) ? strrchr(context->pub.fileName, '/') : "UNKNOWN";
-    ident = ident ? ident : context->pub.fileName;
+    const char* ident = (context->pub.fileName) ? context->pub.fileName : "UNKNOWN";
 
     fprintf(stderr, "%s:%d [%lu] bytes%s\n",
             ident,
@@ -47,15 +48,44 @@ static void unroll(struct Allocator_pvt* context, struct Unroller* unroller)
             context->allocatedHere,
             (context->pub.isFreeing) ? " (freeing)" : "");
 
+    struct Unroller childUnroller = {
+        .content = ((context->nextSibling) ? "| " : "  "),
+        .last = unroller
+    };
     if (context->firstChild) {
-        unroll(context->firstChild, &(struct Unroller) {
-            .content = ((context->nextSibling) ? "| " : "  "),
-            .last = unroller
-        });
+        unroll(context->firstChild, includeAllocations, &childUnroller);
+    }
+    struct Allocator_Allocation_pvt* allocation = context->allocations;
+    while (allocation && includeAllocations) {
+        writeUnroller(&childUnroller);
+        fprintf(stderr, "%s:%d [%lu] bytes at [0x%lx]\n",
+                allocation->pub.fileName,
+                allocation->pub.lineNum,
+                allocation->pub.size,
+                (long)(uintptr_t)allocation);
+        allocation = allocation->next;
     }
     if (context->nextSibling) {
-        unroll(context->nextSibling, unroller);
+        unroll(context->nextSibling, includeAllocations, unroller);
     }
+}
+
+void Allocator_snapshot(struct Allocator* alloc, int includeAllocations)
+{
+    // get the root allocator.
+    struct Allocator_pvt* rootAlloc = Identity_check((struct Allocator_pvt*)alloc);
+    while (rootAlloc->lastSibling && rootAlloc->lastSibling != rootAlloc) {
+        rootAlloc = rootAlloc->lastSibling;
+    }
+    fprintf(stderr, "----- %scjdns memory snapshot -----\n", "");
+
+    unroll(rootAlloc, includeAllocations, NULL);
+
+    fprintf(stderr, "totalBytes [%ld] remaining [%ld]\n",
+                    (long)rootAlloc->rootAlloc->maxSpace,
+                    (long)rootAlloc->rootAlloc->spaceAvailable);
+
+    fprintf(stderr, "----- %scjdns memory snapshot -----\n", "end ");
 }
 
 Gcc_NORETURN
@@ -64,18 +94,8 @@ static void failure(struct Allocator_pvt* context,
                     const char* fileName,
                     int lineNum)
 {
-    // get the root allocator.
-    struct Allocator_pvt* rootAlloc = context;
-    while (rootAlloc->lastSibling && rootAlloc->lastSibling != rootAlloc) {
-        rootAlloc = rootAlloc->lastSibling;
-    }
-    // can't use this allocator because it failed.
-    unroll(rootAlloc, NULL);
-
-    Assert_failure("%s:%d Fatal error: [%s] totalBytes [%ld] remaining [%ld]",
-                   fileName, lineNum, message,
-                   (long)context->rootAlloc->maxSpace,
-                   (long)context->rootAlloc->spaceAvailable);
+    Allocator_snapshot(&context->pub, 0);
+    Assert_failure("%s:%d Fatal error: [%s]", fileName, lineNum, message);
 }
 
 static inline unsigned long getRealSize(unsigned long requestedSize)
@@ -148,7 +168,7 @@ static inline void* newAllocation(struct Allocator_pvt* context,
 
 struct Allocator_Allocation* Allocator_getAllocation(struct Allocator* alloc, int allocNum)
 {
-    struct Allocator_pvt* ctx = Identity_cast((struct Allocator_pvt*)alloc);
+    struct Allocator_pvt* ctx = Identity_check((struct Allocator_pvt*)alloc);
     if (allocNum < 0) {
         return NULL;
     }
@@ -161,7 +181,7 @@ struct Allocator_Allocation* Allocator_getAllocation(struct Allocator* alloc, in
 
 struct Allocator* Allocator_getChild(struct Allocator* alloc, int childNumber)
 {
-    struct Allocator_pvt* ctx = Identity_cast((struct Allocator_pvt*)alloc);
+    struct Allocator_pvt* ctx = Identity_check((struct Allocator_pvt*)alloc);
     if (childNumber < 0) {
         return NULL;
     }
@@ -174,7 +194,7 @@ struct Allocator* Allocator_getChild(struct Allocator* alloc, int childNumber)
 
 static int removeJob(struct Allocator_OnFreeJob_pvt* job)
 {
-    struct Allocator_pvt* context = Identity_cast(job->alloc);
+    struct Allocator_pvt* context = Identity_check(job->alloc);
     struct Allocator_OnFreeJob_pvt* j = context->onFree;
     struct Allocator_OnFreeJob_pvt** jP = &context->onFree;
     while (j && j != job) {
@@ -305,7 +325,7 @@ static void childFreed(struct Allocator_pvt* child)
 void Allocator_onFreeComplete(struct Allocator_OnFreeJob* onFreeJob)
 {
     struct Allocator_OnFreeJob_pvt* job = (struct Allocator_OnFreeJob_pvt*) onFreeJob;
-    struct Allocator_pvt* context = Identity_cast(job->alloc);
+    struct Allocator_pvt* context = Identity_check(job->alloc);
 
     if (removeJob(job)) {
         failure(context, "OnFreeJob->complete() called multiple times", job->file, job->line);
@@ -424,7 +444,7 @@ static void freeAllocator(struct Allocator_pvt* context, const char* file, int l
 
 void Allocator__free(struct Allocator* alloc, const char* file, int line)
 {
-    struct Allocator_pvt* context = Identity_cast((struct Allocator_pvt*) alloc);
+    struct Allocator_pvt* context = Identity_check((struct Allocator_pvt*) alloc);
     freeAllocator(context, file, line);
 }
 
@@ -433,7 +453,7 @@ void* Allocator__malloc(struct Allocator* allocator,
                         const char* fileName,
                         int lineNum)
 {
-    struct Allocator_pvt* ctx = Identity_cast((struct Allocator_pvt*) allocator);
+    struct Allocator_pvt* ctx = Identity_check((struct Allocator_pvt*) allocator);
     return newAllocation(ctx, length, fileName, lineNum);
 }
 
@@ -458,7 +478,7 @@ void* Allocator__realloc(struct Allocator* allocator,
         return Allocator__malloc(allocator, size, fileName, lineNum);
     }
 
-    struct Allocator_pvt* context = Identity_cast((struct Allocator_pvt*) allocator);
+    struct Allocator_pvt* context = Identity_check((struct Allocator_pvt*) allocator);
     struct Allocator_Allocation_pvt** locPtr = &context->allocations;
     struct Allocator_Allocation_pvt* origLoc =
         ((struct Allocator_Allocation_pvt*) original) - 1;
@@ -532,7 +552,7 @@ void* Allocator__clone(struct Allocator* allocator,
 
 struct Allocator* Allocator__child(struct Allocator* allocator, const char* file, int line)
 {
-    struct Allocator_pvt* parent = Identity_cast((struct Allocator_pvt*) allocator);
+    struct Allocator_pvt* parent = Identity_check((struct Allocator_pvt*) allocator);
 
     struct Allocator_pvt stackChild = {
         .pub = {
@@ -564,7 +584,7 @@ struct Allocator* Allocator__child(struct Allocator* allocator, const char* file
 int Allocator_cancelOnFree(struct Allocator_OnFreeJob* toRemove)
 {
     struct Allocator_OnFreeJob_pvt* job = (struct Allocator_OnFreeJob_pvt*) toRemove;
-    struct Allocator_pvt* context = Identity_cast(job->alloc);
+    struct Allocator_pvt* context = Identity_check(job->alloc);
     struct Allocator_OnFreeJob_pvt** jobPtr = &(context->onFree);
     while (*jobPtr != NULL) {
         if (*jobPtr == job) {
@@ -605,8 +625,8 @@ void Allocator__adopt(struct Allocator* adoptedParent,
                       const char* file,
                       int line)
 {
-    struct Allocator_pvt* parent = Identity_cast((struct Allocator_pvt*) adoptedParent);
-    struct Allocator_pvt* child = Identity_cast((struct Allocator_pvt*) childToAdopt);
+    struct Allocator_pvt* parent = Identity_check((struct Allocator_pvt*) adoptedParent);
+    struct Allocator_pvt* child = Identity_check((struct Allocator_pvt*) childToAdopt);
 
     if (isAncestorOf(child, parent)) {
         // The child is a parent of the parent, this means an adoption would be meaningless
@@ -642,7 +662,7 @@ struct Allocator_OnFreeJob* Allocator__onFree(struct Allocator* alloc,
                                               const char* file,
                                               int line)
 {
-    struct Allocator_pvt* context = Identity_cast((struct Allocator_pvt*) alloc);
+    struct Allocator_pvt* context = Identity_check((struct Allocator_pvt*) alloc);
 
     struct Allocator_OnFreeJob_pvt* newJob =
         Allocator_clone(alloc, (&(struct Allocator_OnFreeJob_pvt) {
@@ -725,14 +745,14 @@ static inline uint64_t bytesAllocated(struct Allocator_pvt* ctx)
 
 unsigned long Allocator_bytesAllocated(struct Allocator* allocator)
 {
-    struct Allocator_pvt* context = Identity_cast((struct Allocator_pvt*) allocator);
+    struct Allocator_pvt* context = Identity_check((struct Allocator_pvt*) allocator);
     return bytesAllocated(context);
 }
 
 void Allocator_setCanary(struct Allocator* alloc, unsigned long value)
 {
     #ifdef Allocator_USE_CANARIES
-        struct Allocator_pvt* context = Identity_cast((struct Allocator_pvt*) alloc);
+        struct Allocator_pvt* context = Identity_check((struct Allocator_pvt*) alloc);
         context->nextCanary ^= value;
     #endif
 }

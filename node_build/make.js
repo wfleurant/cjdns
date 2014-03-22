@@ -17,13 +17,14 @@ var nThen = require('nthen');
 var Codestyle = require('./Codestyle');
 var Cp = require('./Cp');
 var Spawn = require('child_process').spawn;
+var Extend = require('node.extend');
 var Os = require('os');
+var FindPython2 = require('./FindPython2');
 
 // ['linux','darwin','sunos','win32','freebsd']
 var SYSTEM = process.platform;
 var CROSS = process.env['CROSS'] || '';
 var GCC = process.env['CC'] || 'gcc';
-var PYTHON = process.env['PYTHON2'] || 'python';
 
 var BUILDDIR = process.env['BUILDDIR'];
 if (BUILDDIR === undefined) {
@@ -79,23 +80,19 @@ Builder.configure({
         // f8 = 241 peers max, fixed width 8 bit
         // v3x5x8 = 256 peers max, variable width, 3, 5 or 8 bits plus 1 or 2 bits of prefix
         // v4x8 = 256 peers max, variable width, 4, or 8 bits plus 1 bit prefix
-        '-D',' NumberCompress_TYPE=v4x8',
+        '-D',' NumberCompress_TYPE=v3x5x8',
 
         // disable for speed, enable for safety
-        '-D','Log_DEBUG',
         '-D','Identity_CHECK=1',
         '-D','Allocator_USE_CANARIES=1',
         '-D','PARANOIA=1'
     );
+    var logLevel = process.env['Log_LEVEL'] || 'DEBUG';
+    builder.config.cflags.push('-D','Log_'+logLevel);
     if (process.env['NO_PIE'] === undefined) {
         builder.config.cflags.push('-fPIE');
     }
-    if (process.env['EXPERIMENTAL_PATHFINDER']) {
-        console.log("Building with experimental pathfinder");
-        builder.config.cflags.push(
-            '-D','EXPERIMENTAL_PATHFINDER=1'
-        );
-    }
+    if (process.env['TESTING']) { builder.config.cflags.push('-D', 'TESTING=1'); }
     if (SYSTEM === 'win32') {
         builder.config.cflags.push(
             '!-fPIE',
@@ -126,6 +123,7 @@ Builder.configure({
             '-Wno-invalid-pp-token',
             '-Wno-dollar-in-identifier-extension',
             '-Wno-newline-eof',
+            '-Wno-unused-value',
 
             // lots of places where depending on preprocessor conditions, a statement might be
             // a case of if (1 == 1)
@@ -143,7 +141,7 @@ Builder.configure({
         });
     }
 
-    // We also need to pass various architecture/floating point flags to GCC when invoked as 
+    // We also need to pass various architecture/floating point flags to GCC when invoked as
     // a linker.
     ldflags = process.env['LDFLAGS'];
     if (ldflags) {
@@ -151,6 +149,12 @@ Builder.configure({
         flags.forEach(function(flag) {
             builder.config.ldflags.push(flag);
         });
+    }
+
+    if (/.*android.*/.test(GCC)) {
+        builder.config.cflags.push(
+            '-Dandroid=1'
+        );
     }
 
     // Build dependencies
@@ -191,16 +195,20 @@ Builder.configure({
 
     }).nThen(function (waitFor) {
         builder.config.libs.push(
-            BUILDDIR+'/dependencies/libuv/out/Release/libuv.a',
-            '-lpthread'
+            BUILDDIR+'/dependencies/libuv/out/Release/libuv.a'
         );
+        if (!/.*android.*/.test(GCC)) {
+            builder.config.libs.push(
+                '-lpthread'
+            );
+        }
         if (builder.config.systemName === 'win32') {
             builder.config.libs.push(
                 '-lws2_32',
                 '-lpsapi',   // GetProcessMemoryInfo()
                 '-liphlpapi' // GetAdapterAddresses()
             );
-        } else if (builder.config.systemName === 'linux') {
+        } else if (builder.config.systemName === 'linux' && !/.*android.*/.test(GCC)) {
             builder.config.libs.push(
                 '-lrt' // clock_gettime()
             );
@@ -208,32 +216,59 @@ Builder.configure({
             builder.config.libs.push(
                 '-framework', 'CoreServices'
             );
+        } else if (builder.config.systemName === 'freebsd') {
+            builder.config.libs.push(
+                '-lkvm'
+            );
         }
         builder.config.includeDirs.push(
             BUILDDIR+'/dependencies/libuv/include/'
         );
-        Fs.exists(BUILDDIR+'/dependencies/libuv/out/Release/libuv.a', waitFor(function (exists) {
-            if (exists) { return; }
+        var libuvBuilt;
+        var python;
+        nThen(function (waitFor) {
+            Fs.exists(BUILDDIR+'/dependencies/libuv/out/Release/libuv.a', waitFor(function (exists) {
+                if (exists) { libuvBuilt = true; }
+            }));
+        }).nThen(function (waitFor) {
+            if (libuvBuilt) { return; }
+            FindPython2.find(builder.tmpFile(), waitFor(function (err, pythonExec) {
+                if (err) { throw err; }
+                python = pythonExec;
+            }));
+        }).nThen(function (waitFor) {
+            if (libuvBuilt) { return; }
             console.log("Build Libuv");
             var cwd = process.cwd();
             process.chdir(BUILDDIR+'/dependencies/libuv/');
 
             var args = ['./gyp_uv.py'];
-            var gyp = Spawn(PYTHON, args);
+            var env = Extend({}, process.env);
+            env.CC = builder.config.gcc;
+            if (env.TARGET_ARCH) {
+                args.push('-Dtarget_arch='+env.TARGET_ARCH);
+            }
+            if (/.*android.*/.test(GCC)) { args.push('-Dtarget_arch=arm', '-DOS=android'); }
+            var gyp = Spawn(python, args, {env:env});
             gyp.stdout.on('data', function(dat) { process.stdout.write(dat.toString()); });
             gyp.stderr.on('data', function(dat) { process.stderr.write(dat.toString()); });
             gyp.on('close', waitFor(function () {
                 var args = ['-j', WORKERS, '-C', 'out', 'BUILDTYPE=Release', 'CC='+builder.config.gcc];
                 if (builder.config.systemName === 'win32') { args.push('PLATFORM=mingw32'); }
                 if (builder.config.systemName !== 'darwin') { args.push('CFLAGS=-fPIC'); }
-                var make = Spawn('make', args);
+                var make;
+                if (builder.config.systemName == 'freebsd') {
+                    make = Spawn('gmake', args);
+                } else {
+                    make = Spawn('make', args);
+                }
                 make.stdout.on('data', function(dat) { process.stdout.write(dat.toString()); });
                 make.stderr.on('data', function(dat) { process.stderr.write(dat.toString()); });
                 make.on('close', waitFor(function () {
                     process.chdir(cwd);
                 }));
             }));
-        }));
+        }).nThen(waitFor());
 
     }).nThen(waitFor());
 
@@ -249,6 +284,8 @@ Builder.configure({
     builder.buildExecutable('contrib/c/cleanconfig.c',     './cleanconfig', waitFor());
     builder.buildExecutable('contrib/c/dnsserv.c',         './dnsserv', waitFor());
     builder.buildExecutable('contrib/c/makekeys.c',        './makekeys', waitFor());
+
+    builder.buildExecutable('crypto/random/randombytes.c',        './randombytes', waitFor());
 
 }).test(function (builder, waitFor) {
 

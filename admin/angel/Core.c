@@ -30,7 +30,7 @@
 #include "dht/SerializationModule.h"
 #include "dht/dhtcore/RouterModule.h"
 #include "dht/dhtcore/RouterModule_admin.h"
-#include "dht/dhtcore/RouteTracer.h"
+#include "dht/dhtcore/RumorMill.h"
 #include "dht/dhtcore/SearchRunner.h"
 #include "dht/dhtcore/SearchRunner_admin.h"
 #include "dht/dhtcore/NodeStore_admin.h"
@@ -58,6 +58,7 @@
 #include "io/Writer.h"
 #include "memory/Allocator.h"
 #include "memory/MallocAllocator.h"
+#include "memory/Allocator_admin.h"
 #include "net/Ducttape.h"
 #include "net/DefaultInterfaceController.h"
 #include "net/SwitchPinger.h"
@@ -69,11 +70,13 @@
 #include "util/events/EventBase.h"
 #include "util/events/Pipe.h"
 #include "util/events/Timeout.h"
+#include "util/Hex.h"
 #include "util/log/FileWriterLog.h"
 #include "util/log/IndirectLog.h"
+#include "util/platform/netdev/NetDev.h"
 #include "util/Security_admin.h"
 #include "util/Security.h"
-#include "util/platform/netdev/NetDev.h"
+#include "util/version/Version.h"
 #include "interface/SessionManager_admin.h"
 
 #include <crypto_scalarmult_curve25519.h>
@@ -81,11 +84,11 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-// Failsafe: abort if more than 2^22 bytes are allocated (4MB)
-#define ALLOCATOR_FAILSAFE (1<<22)
+// Failsafe: abort if more than 2^23 bytes are allocated (8MB)
+#define ALLOCATOR_FAILSAFE (1<<23)
 
 /** The number of nodes which we will keep track of. */
-#define NODE_STORE_SIZE 8192
+#define NODE_STORE_SIZE 256
 
 /** The number of milliseconds between attempting local maintenance searches. */
 #define LOCAL_MAINTENANCE_SEARCH_MILLISECONDS 1000
@@ -95,6 +98,8 @@
  * These are searches for random targets which are used to discover new nodes.
  */
 #define GLOBAL_MAINTENANCE_SEARCH_MILLISECONDS 30000
+
+#define RUMORMILL_CAPACITY 64
 
 /**
  * The worst possible packet overhead.
@@ -148,15 +153,6 @@ struct Context
     struct EventBase* base;
     String* exitTxid;
 };
-
-static void adminMemory(Dict* input, void* vcontext, String* txid, struct Allocator* requestAlloc)
-{
-    struct Context* context = vcontext;
-    Dict d = Dict_CONST(
-        String_CONST("bytes"), Int_OBJ(Allocator_bytesAllocated(context->allocator)), NULL
-    );
-    Admin_sendMessage(&d, txid, context->admin);
-}
 
 static void shutdown(void* vcontext)
 {
@@ -379,7 +375,7 @@ void Core_init(struct Allocator* alloc,
     }
 
     // CryptoAuth
-    struct Address addr;
+    struct Address addr = { .protocolVersion = Version_CURRENT_PROTOCOL };
     parsePrivateKey(privateKey, &addr, eh);
     struct CryptoAuth* cryptoAuth = CryptoAuth_new(alloc, privateKey, eventBase, logger, rand);
 
@@ -390,7 +386,7 @@ void Core_init(struct Allocator* alloc,
     ReplyModule_register(registry, alloc);
 
 
-    struct NodeStore* nodeStore = NodeStore_new(&addr, NODE_STORE_SIZE, alloc, logger, rand);
+    struct NodeStore* nodeStore = NodeStore_new(&addr, NODE_STORE_SIZE, alloc, logger);
 
     struct RouterModule* routerModule = RouterModule_register(registry,
                                                               alloc,
@@ -399,24 +395,32 @@ void Core_init(struct Allocator* alloc,
                                                               logger,
                                                               rand,
                                                               nodeStore);
-    struct RouteTracer* routeTracer =
-        RouteTracer_new(nodeStore, routerModule, addr.ip6.bytes, eventBase, logger, alloc);
 
-    struct SearchRunner* searchRunner =
-        SearchRunner_new(nodeStore, logger, eventBase, routerModule, addr.ip6.bytes, alloc);
+    struct RumorMill* rumorMill = RumorMill_new(alloc, &addr, RUMORMILL_CAPACITY);
+
+    struct RumorMill* nodesOfInterest = RumorMill_new(alloc, &addr, RUMORMILL_CAPACITY);
+
+    struct SearchRunner* searchRunner = SearchRunner_new(nodeStore,
+                                                         logger,
+                                                         eventBase,
+                                                         routerModule,
+                                                         addr.ip6.bytes,
+                                                         rumorMill,
+                                                         alloc);
 
     Janitor_new(LOCAL_MAINTENANCE_SEARCH_MILLISECONDS,
                 GLOBAL_MAINTENANCE_SEARCH_MILLISECONDS,
                 routerModule,
                 nodeStore,
                 searchRunner,
-                routeTracer,
+                rumorMill,
+                nodesOfInterest,
                 logger,
                 alloc,
                 eventBase,
                 rand);
 
-    EncodingSchemeModule_register(registry, nodeStore, logger, alloc);
+    EncodingSchemeModule_register(registry, logger, alloc);
 
     SerializationModule_register(registry, logger, alloc);
 
@@ -426,6 +430,7 @@ void Core_init(struct Allocator* alloc,
                                             registry,
                                             routerModule,
                                             searchRunner,
+                                            nodesOfInterest,
                                             switchCore,
                                             eventBase,
                                             alloc,
@@ -434,13 +439,14 @@ void Core_init(struct Allocator* alloc,
                                             rand);
 
     struct SwitchPinger* sp =
-        SwitchPinger_new(&dt->switchPingerIf, eventBase, rand, logger, alloc);
+        SwitchPinger_new(&dt->switchPingerIf, eventBase, rand, logger, &addr, alloc);
 
     // Interfaces.
     struct InterfaceController* ifController =
         DefaultInterfaceController_new(cryptoAuth,
                                        switchCore,
                                        routerModule,
+                                       rumorMill,
                                        logger,
                                        eventBase,
                                        sp,
@@ -477,6 +483,7 @@ void Core_init(struct Allocator* alloc,
     IpTunnel_admin_register(ipTun, admin, alloc);
     SessionManager_admin_register(dt->sessionManager, admin, alloc);
     RainflyClient_admin_register(rainfly, admin, alloc);
+    Allocator_admin_register(alloc, admin);
 
     struct Context* ctx = Allocator_clone(alloc, (&(struct Context) {
         .allocator = alloc,
@@ -485,7 +492,6 @@ void Core_init(struct Allocator* alloc,
         .hermes = hermes,
         .base = eventBase,
     }));
-    Admin_registerFunction("memory", adminMemory, ctx, false, NULL, admin);
     Admin_registerFunction("Core_exit", adminExit, ctx, true, NULL, admin);
 }
 
