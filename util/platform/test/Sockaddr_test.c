@@ -12,28 +12,26 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#define string_strlen
-#define string_strcmp
 #include "memory/MallocAllocator.h"
 #include "util/platform/Sockaddr.h"
 #include "util/Assert.h"
-#include "util/platform/libc/string.h"
+#include "util/CString.h"
 
 static void expectFailure(char* address)
 {
     struct Sockaddr_storage ss;
-    Assert_always(Sockaddr_parse(address, &ss));
+    Assert_true(Sockaddr_parse(address, &ss));
 }
 
 static void expectConvert(char* address, char* expectedOutput)
 {
     struct Sockaddr_storage ss;
-    Assert_always(!Sockaddr_parse(address, &ss));
+    Assert_true(!Sockaddr_parse(address, &ss));
     struct Allocator* alloc = MallocAllocator_new(20000);
     char* outAddr = Sockaddr_print(&ss.addr, alloc);
-    Assert_always(outAddr);
-    Assert_always(strlen(outAddr) == strlen(expectedOutput));
-    Assert_always(!strcmp(outAddr, expectedOutput));
+    Assert_true(outAddr);
+    Assert_true(CString_strlen(outAddr) == CString_strlen(expectedOutput));
+    Assert_true(!CString_strcmp(outAddr, expectedOutput));
     Allocator_free(alloc);
 }
 
@@ -45,7 +43,7 @@ static void expectSuccess(char* address)
 static void parse()
 {
     struct Sockaddr_storage test;
-    Assert_always(Sockaddr_asNative(&test.addr) == ((uint8_t*)&test) + Sockaddr_OVERHEAD);
+    Assert_true(Sockaddr_asNative(&test.addr) == ((uint8_t*)&test) + Sockaddr_OVERHEAD);
 
 
     expectSuccess("0.0.0.0");
@@ -76,7 +74,7 @@ static void fromName()
     struct Allocator* alloc = MallocAllocator_new(20000);
     Sockaddr_fromName("localhost", alloc);
     // This will fail in some cases (eg dns hijacking)
-    //Assert_always(!Sockaddr_fromName("hasjklgyolgbvlbiogi", alloc));
+    //Assert_true(!Sockaddr_fromName("hasjklgyolgbvlbiogi", alloc));
     Allocator_free(alloc);
 }
 

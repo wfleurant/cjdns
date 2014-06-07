@@ -27,7 +27,6 @@
 #include "memory/Allocator.h"
 #include "tunnel/IpTunnel.h"
 #include "crypto/AddressCalc.h"
-#include "util/platform/libc/strlen.h"
 #include "util/Checksum.h"
 #include "util/AddrTools.h"
 #include "util/events/EventBase.h"
@@ -362,6 +361,12 @@ static void addAddressCallback(Dict* responseMessage, void* vcontext)
     }
     if (!error || !String_equals(error, String_CONST("none"))) {
         Log_error(ctx->logger, "Error setting ip address on TUN [%s]", err);
+
+        #ifndef Log_ERROR
+            // this whole function does essentially nothing but log an error so unused vars.
+            err = err;
+            ctx = ctx;
+        #endif
     }
 }
 

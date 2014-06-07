@@ -33,14 +33,15 @@ static uint8_t catchResponse(struct Message* msg, struct Interface* iface)
 
 int main()
 {
-return 0; // TODO make this work again
+    return 0; // TODO(cjd): make this work again
+
     char* pingBenc = "d1:q4:ping4:txid4:abcd1:pi2ee";
     struct Allocator* alloc = MallocAllocator_new(1<<22);
     struct TestFramework* tf = TestFramework_setUp("0123456789abcdefghijklmnopqrstuv", alloc, NULL);
     struct Ducttape_pvt* dt = (struct Ducttape_pvt*) tf->ducttape;
 
     struct Allocator* allocator = MallocAllocator_new(85000);
-    uint16_t buffLen = sizeof(struct Ducttape_IncomingForMe) + 8 + strlen(pingBenc);
+    uint16_t buffLen = sizeof(struct Ducttape_IncomingForMe) + 8 + CString_strlen(pingBenc);
     uint8_t* buff = Allocator_calloc(allocator, buffLen+PADDING, 1);
     struct Headers_SwitchHeader* sh = (struct Headers_SwitchHeader*) (buff + PADDING);
     sh->label_be = Endian_hostToBigEndian64(4);
@@ -72,7 +73,7 @@ return 0; // TODO make this work again
         .alloc = alloc
     };
     Ducttape_injectIncomingForMe(&m, &dt->pub, herPublicKey);
-    Assert_always(!dt->switchInterface.receiverContext);
+    Assert_true(!dt->switchInterface.receiverContext);
 
     // zero checksum
     udp->checksum_be = 0;
@@ -83,7 +84,7 @@ return 0; // TODO make this work again
         .alloc = alloc
     };
     Ducttape_injectIncomingForMe(&m2, &dt->pub, herPublicKey);
-    Assert_always(!dt->switchInterface.receiverContext);
+    Assert_true(!dt->switchInterface.receiverContext);
 
     // good checksum
     udp->checksum_be =
@@ -97,7 +98,7 @@ return 0; // TODO make this work again
         .alloc = alloc
     };
     Ducttape_injectIncomingForMe(&m3, &dt->pub, herPublicKey);
-    Assert_always(dt->switchInterface.receiverContext);
+    Assert_true(dt->switchInterface.receiverContext);
 
     Allocator_free(alloc);
     Allocator_free(allocator);

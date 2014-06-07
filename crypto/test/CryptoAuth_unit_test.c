@@ -12,8 +12,6 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#define string_strcpy
-#define string_strlen
 #include "benc/List.h"
 #include "benc/String.h"
 #include "crypto/CryptoAuth_pvt.h"
@@ -22,7 +20,6 @@
 #include "io/FileWriter.h"
 #include "memory/MallocAllocator.h"
 #include "memory/Allocator.h"
-#include "util/platform/libc/string.h"
 #include "util/events/EventBase.h"
 #include "util/Assert.h"
 #include "util/Bits.h"
@@ -56,7 +53,7 @@ static void encryptRndNonceTest()
     Bits_memset(secret, 0, 32);
 
     struct Message m = { .bytes=&buff[32], .length=12, .padding=32};
-    strcpy((char*) m.bytes, "hello world");
+    CString_strcpy((char*) m.bytes, "hello world");
 
     CryptoAuth_encryptRndNonce(nonce, &m, secret);
 
@@ -65,10 +62,10 @@ static void encryptRndNonceTest()
     Hex_encode(output, 57, m.bytes, m.length);
 
     //printf("\n%s\n%s\n", (char*) expected, (char*) output);
-    Assert_always(!Bits_memcmp(expected, output, 56));
+    Assert_true(!Bits_memcmp(expected, output, 56));
 
-    Assert_always(!CryptoAuth_decryptRndNonce(nonce, &m, secret));
-    Assert_always(m.length == 12 && !Bits_memcmp(m.bytes, "hello world", m.length));
+    Assert_true(!CryptoAuth_decryptRndNonce(nonce, &m, secret));
+    Assert_true(m.length == 12 && !Bits_memcmp(m.bytes, "hello world", m.length));
 }
 
 static struct Random* evilRandom(struct Allocator* alloc, struct Log* logger)
@@ -85,7 +82,7 @@ static void createNew()
     /*for (int i = 0; i < 32; i++) {
         printf("%.2x", ca->publicKey[i]);
     }*/
-    Assert_always(Bits_memcmp(ca->publicKey, publicKey, 32) == 0);
+    Assert_true(Bits_memcmp(ca->publicKey, publicKey, 32) == 0);
     Allocator_free(allocator);
 }
 
@@ -130,7 +127,7 @@ static struct CryptoAuth_Wrapper* setUp(uint8_t* myPrivateKey,
             .senderContext = wrapper,
             .allocator = allocator
         };
-        String str = { .bytes = (char*) authPassword, .len = strlen((char*)authPassword) };
+        String str = { .bytes = (char*) authPassword, .len = CString_strlen((char*)authPassword) };
         CryptoAuth_setAuth(&str, 1, &temp);
     }
 
@@ -143,7 +140,7 @@ static struct CryptoAuth_Wrapper* setUp(uint8_t* myPrivateKey,
 
 static void testHello(uint8_t* password, uint8_t* expectedOutput)
 {
-    Assert_always(strlen((char*)expectedOutput) == 264);
+    Assert_true(CString_strlen((char*)expectedOutput) == 264);
     struct Message* outMessage;
     struct CryptoAuth_Wrapper* wrapper =
         setUp(NULL, (uint8_t*) "wxyzabcdefghijklmnopqrstuv987654", password, &outMessage);
@@ -158,7 +155,7 @@ static void testHello(uint8_t* password, uint8_t* expectedOutput)
     CryptoAuth_encryptHandshake(&msg, wrapper, 0);
 
     uint8_t actual[265];
-    Assert_always(Hex_encode(actual, 265, outMessage->bytes, outMessage->length) > 0);
+    Assert_true(Hex_encode(actual, 265, outMessage->bytes, outMessage->length) > 0);
     //printf("%s", actual);
     if (Bits_memcmp(actual, expectedOutput, 264)) {
         Assert_failure("Test failed.\n"
@@ -201,7 +198,7 @@ static void receiveHelloWithNoAuth()
         "29ea3e12";
 
     uint8_t message[132];
-    Assert_always(Hex_decode(message, 132, messageHex, strlen((char*)messageHex)) > 0);
+    Assert_true(Hex_decode(message, 132, messageHex, CString_strlen((char*)messageHex)) > 0);
     struct Message incoming = {
         .length = 132,
         .padding = 0,
@@ -216,9 +213,9 @@ static void receiveHelloWithNoAuth()
 
     CryptoAuth_receiveMessage(&incoming, &(struct Interface) { .receiverContext = wrapper } );
 
-    Assert_always(finalOut);
-    Assert_always(finalOut->length == 12);
-    Assert_always(Bits_memcmp(hello, finalOut->bytes, 12) == 0);
+    Assert_true(finalOut);
+    Assert_true(finalOut->length == 12);
+    Assert_true(Bits_memcmp(hello, finalOut->bytes, 12) == 0);
     //printf("bytes=%s  length=%u\n", finalOut->bytes, finalOut->length);
 }
 
@@ -259,7 +256,7 @@ static void repeatHello()
     CryptoAuth_encryptHandshake(&msg2, &wrapper, 0);
 
     // Check the nonce
-    Assert_always(!Bits_memcmp(msg2.bytes, "\0\0\0\1", 4));
+    Assert_true(!Bits_memcmp(msg2.bytes, "\0\0\0\1", 4));
 
     ca = CryptoAuth_new(allocator, privateKey, eventBase, logger, evilRandom(allocator, logger));
     struct Message* finalOut = NULL;
@@ -277,9 +274,9 @@ static void repeatHello()
 
     CryptoAuth_receiveMessage(out, &(struct Interface) { .receiverContext = &wrapper2 } );
 
-    Assert_always(finalOut);
-    Assert_always(finalOut->length == 12);
-    Assert_always(Bits_memcmp(hello, finalOut->bytes, 12) == 0);
+    Assert_true(finalOut);
+    Assert_true(finalOut->length == 12);
+    Assert_true(Bits_memcmp(hello, finalOut->bytes, 12) == 0);
     //printf("bytes=%s  length=%u\n", finalOut->bytes, finalOut->length);
 
     Allocator_free(allocator);
@@ -294,18 +291,18 @@ static void testGetUsers()
     List* users = NULL;
 
     users = CryptoAuth_getUsers(ca, allocator);
-    Assert_always(List_size(users) == -1);
+    Assert_true(List_size(users) == -1);
 
     CryptoAuth_addUser(String_CONST("pass1"), 1, String_CONST("user1"), ca);
     users = CryptoAuth_getUsers(ca, allocator);
-    Assert_always(List_size(users) == 1);
-    Assert_always(String_equals(String_CONST("user1"),List_getString(users,0)));
+    Assert_true(List_size(users) == 1);
+    Assert_true(String_equals(String_CONST("user1"),List_getString(users,0)));
 
     CryptoAuth_addUser(String_CONST("pass2"), 1, String_CONST("user2"), ca);
     users = CryptoAuth_getUsers(ca, allocator);
-    Assert_always(List_size(users) == 2);
-    Assert_always(String_equals(String_CONST("user2"),List_getString(users,0)));
-    Assert_always(String_equals(String_CONST("user1"),List_getString(users,1)));
+    Assert_true(List_size(users) == 2);
+    Assert_true(String_equals(String_CONST("user2"),List_getString(users,0)));
+    Assert_true(String_equals(String_CONST("user1"),List_getString(users,1)));
 
     Allocator_free(allocator);
 }

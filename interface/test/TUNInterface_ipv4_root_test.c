@@ -12,8 +12,6 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#define string_strcmp
-#define string_strlen
 #include "admin/testframework/AdminTestFramework.h"
 #include "admin/Admin.h"
 #include "admin/AdminClient.h"
@@ -31,7 +29,6 @@
 #include "util/Assert.h"
 #include "util/log/Log.h"
 #include "util/log/WriterLog.h"
-#include "util/platform/libc/string.h"
 #include "util/events/Timeout.h"
 #include "wire/Ethernet.h"
 #include "wire/Headers.h"
@@ -61,10 +58,10 @@ static uint8_t receiveMessageTUN(struct Message* msg, struct Interface* iface)
 
     struct Headers_IP4Header* header = (struct Headers_IP4Header*) msg->bytes;
 
-    Assert_always(msg->length == Headers_IP4Header_SIZE + Headers_UDPHeader_SIZE + 12);
+    Assert_true(msg->length == Headers_IP4Header_SIZE + Headers_UDPHeader_SIZE + 12);
 
-    Assert_always(!Bits_memcmp(header->destAddr, testAddrB, 4));
-    Assert_always(!Bits_memcmp(header->sourceAddr, testAddrA, 4));
+    Assert_true(!Bits_memcmp(header->destAddr, testAddrB, 4));
+    Assert_true(!Bits_memcmp(header->sourceAddr, testAddrA, 4));
 
     Bits_memcpyConst(header->destAddr, testAddrA, 4);
     Bits_memcpyConst(header->sourceAddr, testAddrB, 4);
@@ -89,12 +86,12 @@ static uint8_t receiveMessageUDP(struct Message* msg, struct Interface* iface)
 
 static void fail(void* ignored)
 {
-    Assert_always(!"timeout");
+    Assert_true(!"timeout");
 }
 
 int main(int argc, char** argv)
 {
-    // TODO: fix TUNConfigurator_addIp4Address() for Illumos, Darwin, BSD.
+    // TODO(cjd): fix TUNConfigurator_addIp4Address() for Illumos, Darwin, BSD.
     #if defined(sunos) || defined(darwin) || defined(freebsd)
         return 0;
     #endif
@@ -111,12 +108,12 @@ int main(int argc, char** argv)
     NetDev_addAddress(assignedIfName, addrA, 30, logger, NULL);
 
     struct Sockaddr_storage ss;
-    Assert_always(!Sockaddr_parse("0.0.0.0", &ss));
+    Assert_true(!Sockaddr_parse("0.0.0.0", &ss));
     struct AddrInterface* udp = UDPAddrInterface_new(base, &ss.addr, alloc, NULL, logger);
 
     struct Sockaddr* dest = Sockaddr_clone(udp->addr, alloc);
     uint8_t* addr;
-    Assert_always(4 == Sockaddr_getAddress(dest, &addr));
+    Assert_true(4 == Sockaddr_getAddress(dest, &addr));
     Bits_memcpy(addr, testAddrB, 4);
 
     struct Message* msg;

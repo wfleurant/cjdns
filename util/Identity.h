@@ -34,22 +34,27 @@
     #define Identity_check(pointer) \
         (__extension__ ({                                                      \
             __typeof__(pointer) Identity_ptr = (pointer);                      \
-            Assert_always(Identity_ptr->Identity_verifier == Identity_MAGIC);  \
+            Assert_true(Identity_ptr->Identity_verifier == Identity_MAGIC);  \
             Identity_ptr;                                                      \
         }))
 
     #define Identity_ncheck(pointer) \
         (__extension__ ({                                                                       \
             __typeof__(pointer) Identity_ptr = (pointer);                                       \
-            Assert_always(!Identity_ptr || Identity_ptr->Identity_verifier == Identity_MAGIC);  \
+            Assert_true(!Identity_ptr || Identity_ptr->Identity_verifier == Identity_MAGIC);  \
             Identity_ptr;                                                                       \
         }))
 
 #else
     #define Identity
     #define Identity_set(pointer)
-    #define Identity_check(pointer) (pointer)
-    #define Identity_ncheck(pointer) (pointer)
+
+    #define Identity_check(pointer) \
+        (__extension__ ({                                                      \
+            (pointer);                                                         \
+        }))
+
+    #define Identity_ncheck(pointer) Identity_check(pointer)
 #endif
 
 #endif

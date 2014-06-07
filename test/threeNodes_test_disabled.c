@@ -12,15 +12,12 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#define string_strncpy
-#define string_strlen
 #include "crypto/Key.h"
 #include "io/FileWriter.h"
 #include "memory/MallocAllocator.h"
 #include "memory/Allocator.h"
 #include "util/Base32.h"
 #include "util/Checksum.h"
-#include "util/platform/libc/string.h"
 #include "util/log/WriterLog.h"
 #include "test/TestFramework.h"
 #include "net/Ducttape_pvt.h"
@@ -35,7 +32,7 @@
 #define TUNA 1
 static uint8_t incomingTunC(struct Message* msg, struct Interface* iface)
 {
-    Assert_always(TUNMessageType_pop(msg, NULL) == Ethernet_TYPE_IP6);
+    Assert_true(TUNMessageType_pop(msg, NULL) == Ethernet_TYPE_IP6);
     Message_shift(msg, -Headers_IP6Header_SIZE, NULL);
     printf("Message from TUN in node C [%s] [%d]\n", msg->bytes, msg->length);
     *((int*)iface->senderContext) = TUNC;
@@ -44,7 +41,7 @@ static uint8_t incomingTunC(struct Message* msg, struct Interface* iface)
 
 static uint8_t incomingTunB(struct Message* msg, struct Interface* iface)
 {
-    Assert_always(TUNMessageType_pop(msg, NULL) == Ethernet_TYPE_IP6);
+    Assert_true(TUNMessageType_pop(msg, NULL) == Ethernet_TYPE_IP6);
     Message_shift(msg, -Headers_IP6Header_SIZE, NULL);
     printf("Message from TUN in node B [%s]\n", msg->bytes);
     *((int*)iface->senderContext) = TUNB;
@@ -53,7 +50,7 @@ static uint8_t incomingTunB(struct Message* msg, struct Interface* iface)
 
 static uint8_t incomingTunA(struct Message* msg, struct Interface* iface)
 {
-    Assert_always(TUNMessageType_pop(msg, NULL) == Ethernet_TYPE_IP6);
+    Assert_true(TUNMessageType_pop(msg, NULL) == Ethernet_TYPE_IP6);
     Message_shift(msg, -Headers_IP6Header_SIZE, NULL);
     uint8_t buff[1024];
     Hex_encode(buff, 1024, msg->bytes, msg->length);
@@ -149,8 +146,8 @@ static void sendMessage(struct ThreeNodes* tn,
     struct Message* msg;
     Message_STACK(msg, 64, 512);
 
-    Bits_memcpy(msg->bytes, message, strlen(message) + 1);
-    msg->length = strlen(message) + 1;
+    Bits_memcpy(msg->bytes, message, CString_strlen(message) + 1);
+    msg->length = CString_strlen(message) + 1;
 
     TestFramework_craftIPHeader(msg, from->ip, to->ip);
 
@@ -165,20 +162,20 @@ static void sendMessage(struct ThreeNodes* tn,
     } else if (from == tn->nodeC) {
         fromIf = &tn->tunIfC;
     } else {
-        Assert_always(false);
+        Assert_true(false);
     }
 
     TUNMessageType_push(msg, Ethernet_TYPE_IP6, NULL);
     fromIf->receiveMessage(msg, fromIf);
 
     if (to == tn->nodeA) {
-        Assert_always(tn->messageFrom == TUNA);
+        Assert_true(tn->messageFrom == TUNA);
     } else if (to == tn->nodeB) {
-        Assert_always(tn->messageFrom == TUNB);
+        Assert_true(tn->messageFrom == TUNB);
     } else if (to == tn->nodeC) {
-        Assert_always(tn->messageFrom == TUNC);
+        Assert_true(tn->messageFrom == TUNC);
     } else {
-        Assert_always(false);
+        Assert_true(false);
     }
 
     TestFramework_assertLastMessageUnaltered(tn->nodeA);

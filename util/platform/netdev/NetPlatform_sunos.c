@@ -15,7 +15,6 @@
 #include "util/platform/netdev/NetPlatform.h"
 #include "util/Assert.h"
 #include "util/platform/Sockaddr.h"
-#include "util/Bits.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -80,8 +79,8 @@ static void setupRoute(const uint8_t address[16],
         }
     };
 
-    Bits_memcpyConst(&rm.dest.sin6_addr, address, 16);
-    Bits_memcpyConst(&rm.gateway.sin6_addr, address, 16);
+    memcpy(&rm.dest.sin6_addr, address, 16);
+    memcpy(&rm.gateway.sin6_addr, address, 16);
     maskForPrefix((uint8_t*) &rm.netmask.sin6_addr, prefixLen);
 
     int sock = socket(PF_ROUTE, SOCK_RAW, 0);
@@ -105,7 +104,7 @@ static void addIp4Address(const char* interfaceName,
                           struct Log* logger,
                           struct Except* eh)
 {
-    // TODO: implement this and then remove the exception from TUNInterface_ipv4_root_test.c
+    // TODO(cjd): implement this and then remove the exception from TUNInterface_ipv4_root_test.c
     Except_throw(eh, "unimplemented");
 }
 
@@ -133,7 +132,7 @@ static void addIp6Address(const char* interfaceName,
         // set the netmask.
         error = "ioctl(SIOCSLIFNETMASK) (setting netmask)";
     }
-    Bits_memcpyConst(&sin6->sin6_addr, address, 16);
+    memcpy(&sin6->sin6_addr, address, 16);
     if (!error && ioctl(udpSock, SIOCSLIFADDR, (caddr_t)&ifr) < 0) {
         // set the ip address.
         error = "ioctl(SIOCSLIFADDR) (setting ipv6 address)";
@@ -177,7 +176,7 @@ void NetPlatform_addAddress(const char* interfaceName,
     } else if (addrFam == Sockaddr_AF_INET) {
         addIp4Address(interfaceName, address, prefixLen, logger, eh);
     } else {
-        Assert_always(0);
+        Assert_true(0);
     }
 }
 

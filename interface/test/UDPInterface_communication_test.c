@@ -12,8 +12,6 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#define string_strcmp
-#define string_strlen
 #include "admin/testframework/AdminTestFramework.h"
 #include "admin/Admin.h"
 #include "admin/AdminClient.h"
@@ -29,7 +27,6 @@
 #include "util/Assert.h"
 #include "util/log/Log.h"
 #include "util/log/WriterLog.h"
-#include "util/platform/libc/string.h"
 #include "util/events/Timeout.h"
 
 #include <stdlib.h>
@@ -68,7 +65,7 @@ static uint8_t receiveMessageB(struct Message* msg, struct Interface* iface)
 
 static void fail(void* ignored)
 {
-    Assert_always(!"timeout");
+    Assert_true(!"timeout");
 }
 
 int main(int argc, char** argv)
@@ -79,12 +76,10 @@ int main(int argc, char** argv)
     struct Log* logger = WriterLog_new(logWriter, alloc);
 
     // mock interface controller.
-    struct InterfaceController ic = {
-        .registerPeer = registerPeer
-    };
+    struct InterfaceController ic = { .registerPeer = registerPeer };
 
     struct Sockaddr_storage addr;
-    Assert_always(!Sockaddr_parse("127.0.0.1", &addr));
+    Assert_true(!Sockaddr_parse("127.0.0.1", &addr));
 
     struct UDPInterface* udpA = UDPInterface_new(base, &addr.addr, alloc, NULL, logger, &ic);
     struct UDPInterface* udpB = UDPInterface_new(base, &addr.addr, alloc, NULL, logger, &ic);

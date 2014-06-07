@@ -16,7 +16,6 @@
 #include "interface/Interface.h"
 #include "util/platform/netdev/NetPlatform.h"
 #include "util/AddrTools.h"
-#include "util/Bits.h"
 
 #include <errno.h>
 #include <ctype.h>
@@ -73,7 +72,7 @@ static void addIp6Address(const char* interfaceName,
         Except_throw(eh, "bad IPv6 address [%s]", gai_strerror(err));
     }
 
-    Bits_memcpy(&in6_addreq.ifra_addr, result->ai_addr, result->ai_addrlen);
+    memcpy(&in6_addreq.ifra_addr, result->ai_addr, result->ai_addrlen);
 
     /* turn the prefixlen into a mask, and add it to the request */
     struct sockaddr_in6* mask = &in6_addreq.ifra_prefixmask;
@@ -122,7 +121,7 @@ void NetPlatform_addAddress(const char* interfaceName,
     } else if (addrFam == Sockaddr_AF_INET) {
         addIp4Address(interfaceName, address, prefixLen, logger, eh);
     } else {
-        Assert_always(0);
+        Assert_true(0);
     }
 }
 

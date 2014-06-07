@@ -29,7 +29,7 @@
 #include "util/log/WriterLog.h"
 #include "util/events/EventBase.h"
 #include "net/SwitchPinger.h"
-#include "net/DefaultInterfaceController.h"
+#include "interface/InterfaceController.h"
 
 #include "crypto_scalarmult_curve25519.h"
 
@@ -56,7 +56,7 @@ static uint8_t sendTo(struct Message* msg, struct Interface* iface)
         dest = &link->destIf;
         srcTf = link->src;
     } else {
-        Assert_always(false);
+        Assert_true(false);
     }
 
     printf("Transferring message to [%p] - message length [%d]\n", (void*)dest, msg->length);
@@ -106,14 +106,12 @@ struct TestFramework* TestFramework_setUp(char* privateKey,
     struct DHTModuleRegistry* registry = DHTModuleRegistry_new(allocator);
     ReplyModule_register(registry, allocator);
 
-    struct NodeStore* nodeStore = NodeStore_new(myAddress, 128, allocator, logger);
+    struct RumorMill* rumorMill = RumorMill_new(allocator, myAddress, 64);
+
+    struct NodeStore* nodeStore = NodeStore_new(myAddress, allocator, logger, rumorMill);
 
     struct RouterModule* routerModule =
         RouterModule_register(registry, allocator, publicKey, base, logger, rand, nodeStore);
-
-    struct RumorMill* rumorMill = RumorMill_new(allocator, myAddress, 64);
-
-    struct RumorMill* nodesOfInterest = RumorMill_new(allocator, myAddress, 64);
 
     struct SearchRunner* searchRunner = SearchRunner_new(nodeStore,
                                                          logger,
@@ -129,22 +127,15 @@ struct TestFramework* TestFramework_setUp(char* privateKey,
 
     struct Ducttape* dt =
         Ducttape_register((uint8_t*)privateKey, registry, routerModule, searchRunner,
-                          nodesOfInterest, switchCore, base, allocator, logger, ipTun, rand);
+                          switchCore, base, allocator, logger, ipTun, rand);
 
     struct SwitchPinger* sp =
         SwitchPinger_new(&dt->switchPingerIf, base, rand, logger, myAddress, allocator);
 
     // Interfaces.
     struct InterfaceController* ifController =
-        DefaultInterfaceController_new(ca,
-                                       switchCore,
-                                       routerModule,
-                                       rumorMill,
-                                       logger,
-                                       base,
-                                       sp,
-                                       rand,
-                                       allocator);
+        InterfaceController_new(ca, switchCore, routerModule, rumorMill,
+                                logger, base, sp, rand, allocator);
 
     struct TestFramework* tf = Allocator_clone(allocator, (&(struct TestFramework) {
         .alloc = allocator,
@@ -173,9 +164,9 @@ void TestFramework_assertLastMessageUnaltered(struct TestFramework* tf)
     }
     struct Message* a = tf->lastMsg;
     struct Message* b = tf->lastMsgBackup;
-    Assert_always(a->length == b->length);
-    Assert_always(a->padding == b->padding);
-    Assert_always(!Bits_memcmp(a->bytes, b->bytes, a->length));
+    Assert_true(a->length == b->length);
+    Assert_true(a->padding == b->padding);
+    Assert_true(!Bits_memcmp(a->bytes, b->bytes, a->length));
 }
 
 void TestFramework_linkNodes(struct TestFramework* client, struct TestFramework* server)

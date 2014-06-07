@@ -20,17 +20,28 @@ var Spawn = require('child_process').spawn;
 var Extend = require('node.extend');
 var Os = require('os');
 var FindPython2 = require('./FindPython2');
+var CanCompile = require('./CanCompile');
 
 // ['linux','darwin','sunos','win32','freebsd']
 var SYSTEM = process.platform;
 var CROSS = process.env['CROSS'] || '';
-var GCC = process.env['CC'] || 'gcc';
+var GCC = process.env['CC'];
+
+if (!GCC) {
+    if (SYSTEM === 'freebsd') {
+        GCC = 'gcc47';
+    } else {
+        GCC = 'gcc';
+    }
+}
 
 var BUILDDIR = process.env['BUILDDIR'];
 if (BUILDDIR === undefined) {
     BUILDDIR = 'build_'+SYSTEM;
-
 }
+
+var OPTIMIZE = '-O2';
+
 // on BSD and iphone systems, os.cpus() is not reliable so if it
 // returns undefined, let's just assume 1
 var WORKERS = Math.floor((typeof Os.cpus() == 'undefined' ? 1 : Os.cpus().length) * 1.25);
@@ -51,8 +62,7 @@ Builder.configure({
 
     builder.config.tempDir = '/tmp';
     builder.config.useTempFiles = true;
-    // @interfect clears #458 for bbb, neon xcompile support
-    builder.config.cflags.push(
+    builder.config.cflags.push.apply(builder.config.cflags, [
         '-std=c99',
         '-Wall',
         '-Wextra',
@@ -63,33 +73,26 @@ Builder.configure({
         '-Wno-unused-parameter',
         '-Wno-unused-result',
 
-        // Broken GCC patch makes -fstack-protector-all not work
-        // workaround is to give -fno-stack-protector first.
-        // see: https://bugs.launchpad.net/ubuntu/+source/gcc-4.5/+bug/691722
-        '-fno-stack-protector',
-        '-fstack-protector-all',
-        '-Wstack-protector',
-
         '-D','HAS_BUILTIN_CONSTANT_P',
 
         '-g',
-
-//        '-flto', not available on some  machines
 
         // f4 = 16 peers max, fixed width 4 bit
         // f8 = 241 peers max, fixed width 8 bit
         // v3x5x8 = 256 peers max, variable width, 3, 5 or 8 bits plus 1 or 2 bits of prefix
         // v4x8 = 256 peers max, variable width, 4, or 8 bits plus 1 bit prefix
-        '-D',' NumberCompress_TYPE=v3x5x8',
+        '-D','NumberCompress_TYPE=v3x5x8',
 
         // disable for speed, enable for safety
         '-D','Identity_CHECK=1',
         '-D','Allocator_USE_CANARIES=1',
         '-D','PARANOIA=1'
-    );
+    ]);
+
     var logLevel = process.env['Log_LEVEL'] || 'DEBUG';
     builder.config.cflags.push('-D','Log_'+logLevel);
-    if (process.env['NO_PIE'] === undefined) {
+    var usePie = process.env['NO_PIE'] === undefined && SYSTEM !== 'freebsd';
+    if (usePie) {
         builder.config.cflags.push('-fPIE');
     }
     if (process.env['TESTING']) { builder.config.cflags.push('-D', 'TESTING=1'); }
@@ -111,7 +114,7 @@ Builder.configure({
         );
     }
 
-    if (process.env['NO_PIE'] === undefined) {
+    if (usePie) {
         builder.config.ldflags.push(
             '-pie'
         );
@@ -155,6 +158,40 @@ Builder.configure({
         builder.config.cflags.push(
             '-Dandroid=1'
         );
+    }
+
+    CanCompile.check(builder,
+                     'int main() { return 0; }',
+                     [ builder.config.cflags, '-flto', '-x', 'c' ],
+                     function (err, can) {
+        if (can) {
+            console.log("Compiler supports link time optimization");
+            builder.config.ldflags.push(
+                '-flto',
+                OPTIMIZE
+            );
+            // No optimization while building since actual compile happens during linking.
+            builder.config.cflags.push('-O0');
+        } else {
+            console.log("Link time optimization not supported [" + err + "]");
+            builder.config.cflags.push(OPTIMIZE);
+        }
+    });
+
+    var uclibc = /uclibc/i.test(GCC);
+    var libssp = process.env['SSP_SUPPORT'] == 'y';
+    if (!uclibc || libssp) {
+        builder.config.cflags.push(
+            // Broken GCC patch makes -fstack-protector-all not work
+            // workaround is to give -fno-stack-protector first.
+            // see: https://bugs.launchpad.net/ubuntu/+source/gcc-4.5/+bug/691722
+            '-fno-stack-protector',
+            '-fstack-protector-all',
+            '-Wstack-protector'
+        );
+        if (uclibc) { builder.config.libs.push('-lssp'); }
+    } else {
+        console.log("Stack Smashing Protection (security feature) is disabled");
     }
 
     // Build dependencies
@@ -280,9 +317,6 @@ Builder.configure({
     builder.buildExecutable('contrib/c/publictoip6.c',     './publictoip6', waitFor());
     builder.buildExecutable('contrib/c/privatetopublic.c', './privatetopublic', waitFor());
     builder.buildExecutable('contrib/c/sybilsim.c',        './sybilsim', waitFor());
-    builder.buildExecutable('contrib/c/benc2json.c',       './benc2json', waitFor());
-    builder.buildExecutable('contrib/c/cleanconfig.c',     './cleanconfig', waitFor());
-    builder.buildExecutable('contrib/c/dnsserv.c',         './dnsserv', waitFor());
     builder.buildExecutable('contrib/c/makekeys.c',        './makekeys', waitFor());
 
     builder.buildExecutable('crypto/random/randombytes.c',        './randombytes', waitFor());

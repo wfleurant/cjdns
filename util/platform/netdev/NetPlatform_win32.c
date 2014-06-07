@@ -47,7 +47,7 @@ typedef NET_LUID IF_LUID, *PIF_LUID;
 #include <ws2ipdef.h>
 #include <naptypes.h>
 #include <ntddndis.h>
-
+#include <string.h>
 #include <ws2def.h>
 #include <iprtrmib.h>
 #include <ifdef.h>
@@ -182,7 +182,7 @@ void NetPlatform_addAddress(const char* name,
     } else if (addrFam == Sockaddr_AF_INET) {
         Bits_memcpyConst(&ipRow.Address.Ipv4.sin_addr, addrBytes, 4);
     } else {
-        Assert_always(0);
+        Assert_true(0);
     }
 
     ipRow.OnLinkPrefixLength = prefixLen;

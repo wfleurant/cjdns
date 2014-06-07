@@ -12,8 +12,6 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#define string_strcpy
-#define string_strlen
 #include "admin/Admin.h"
 #include "benc/Dict.h"
 #include "benc/String.h"
@@ -26,7 +24,6 @@
 #include "switch/EncodingScheme.h"
 #include "util/AddrTools.h"
 #include "util/version/Version.h"
-#include "util/platform/libc/string.h"
 
 struct Context {
     struct Admin* admin;
@@ -78,7 +75,7 @@ static void dumpTable_addEntries(struct Context* ctx,
     }
 
     struct Node_Two* n = NodeStore_dumpTable(ctx->store, i);
-    link->as.number = n->pathQuality;
+    link->as.number = Node_getReach(n);
     version->as.number = n->address.protocolVersion;
     Address_printIp(ip, &n->address);
     AddrTools_printPath(path, n->address.path);
@@ -92,6 +89,27 @@ static void dumpTable(Dict* args, void* vcontext, String* txid, struct Allocator
     int64_t* page = Dict_getInt(args, String_CONST("page"));
     int i = (page) ? *page * ENTRIES_PER_PAGE : 0;
     dumpTable_addEntries(ctx, i, 0, NULL, txid);
+}
+
+static int linkCount(struct Node_Two* parent)
+{
+    struct Node_Link* link = NULL;
+    int i = 0;
+    do {
+        link = NodeStore_nextLink(parent, link);
+        i++;
+    } while (link);
+    return i;
+}
+
+static struct Node_Link* getLinkByNum(struct Node_Two* parent, int linkNum)
+{
+    struct Node_Link* link = NULL;
+    for (int i = 0; i <= linkNum; i++) {
+        link = NodeStore_nextLink(parent, link);
+        if (!link) { break; }
+    }
+    return link;
 }
 
 static void getLink(Dict* args, void* vcontext, String* txid, struct Allocator* alloc)
@@ -122,7 +140,7 @@ static void getLink(Dict* args, void* vcontext, String* txid, struct Allocator* 
                        String_new("not_found", alloc),
                        alloc);
 
-    } else if ((link = NodeStore_getLink(node, *linkNum))) {
+    } else if ((link = getLinkByNum(node, *linkNum))) {
         Dict_putInt(result,
                     String_new("inverseLinkEncodingFormNumber", alloc),
                     link->inverseLinkEncodingFormNumber,
@@ -183,21 +201,21 @@ static void nodeForAddr(Dict* args, void* vcontext, String* txid, struct Allocat
     String* key = Key_stringify(node->address.key, alloc);
     Dict_putString(result, String_new("key", alloc), key, alloc);
 
-    uint32_t linkCount = NodeStore_linkCount(node);
-    Dict_putInt(result, String_new("linkCount", alloc), linkCount, alloc);
+    uint32_t count = linkCount(node);
+    Dict_putInt(result, String_new("linkCount", alloc), count, alloc);
 
-    Dict_putInt(result, String_new("reach", alloc), node->pathQuality, alloc);
+    Dict_putInt(result, String_new("reach", alloc), Node_getReach(node), alloc);
 
     List* encScheme = EncodingScheme_asList(node->encodingScheme, alloc);
     Dict_putList(result, String_new("encodingScheme", alloc), encScheme, alloc);
 
     Dict* bestParent = Dict_new(alloc);
     String* parentIp = String_newBinary(NULL, 39, alloc);
-    AddrTools_printIp(parentIp->bytes, node->bestParent->parent->address.ip6.bytes);
+    AddrTools_printIp(parentIp->bytes, Node_getBestParent(node)->parent->address.ip6.bytes);
     Dict_putString(bestParent, String_CONST("ip"), parentIp, alloc);
 
     String* parentChildLabel = String_newBinary(NULL, 19, alloc);
-    AddrTools_printPath(parentChildLabel->bytes, node->bestParent->cannonicalLabel);
+    AddrTools_printPath(parentChildLabel->bytes, Node_getBestParent(node)->cannonicalLabel);
     Dict_putString(bestParent, String_CONST("parentChildLabel"), parentChildLabel, alloc);
 
     Dict_putDict(result, String_CONST("bestParent"), bestParent, alloc);
@@ -216,13 +234,13 @@ static void getRouteLabel(Dict* args, void* vcontext, String* txid, struct Alloc
     char* err = NULL;
 
     String* pathToParentS = Dict_getString(args, String_CONST("pathToParent"));
-    uint64_t pathToParent;
+    uint64_t pathToParent = 0;
     if (pathToParentS->len != 19 || AddrTools_parsePath(&pathToParent, pathToParentS->bytes)) {
         err = "parse_pathToParent";
     }
 
     String* pathParentToChildS = Dict_getString(args, String_CONST("pathParentToChild"));
-    uint64_t pathParentToChild;
+    uint64_t pathParentToChild = 0;
     if (pathParentToChildS->len != 19
         || AddrTools_parsePath(&pathParentToChild, pathParentToChildS->bytes))
     {

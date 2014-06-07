@@ -20,9 +20,9 @@
 #include "benc/Object.h"
 #include "benc/serialization/BencSerializer.h"
 #include "benc/serialization/standard/StandardBencSerializer.h"
-
 #include "util/Assert.h"
-#include "util/platform/libc/string.h"
+
+#include <stddef.h> // NULL
 
 #define DEBUG2(x, y)
 /* #define DEBUG2(x, y) fprintf(stderr, x, y); fflush(stderr) */
@@ -70,7 +70,7 @@ void DHTModuleRegistry_handleIncoming(struct DHTMessage* message,
         if (module && module->handleIncoming) {
             DEBUG2("<< calling: %s->handleIncoming\n", module->name);
             if (module->handleIncoming(message, module->context) != 0) {
-                // TODO: Call a debugger with all unhandlable messages?
+                // TODO(cjd): Call a debugger with all unhandlable messages?
                 return;
             }
         } else {
@@ -82,7 +82,7 @@ void DHTModuleRegistry_handleIncoming(struct DHTMessage* message,
 
 static int dhtModuleHandleOutgoing(struct DHTModule* module, struct DHTMessage* message)
 {
-    Assert_true(module != NULL);
+    Assert_ifParanoid(module != NULL);
     if (module->handleOutgoing) {
         DEBUG2(">> calling: %s->handleOutgoing\n", module->name);
         return module->handleOutgoing(message, module->context);

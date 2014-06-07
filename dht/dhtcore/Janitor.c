@@ -31,7 +31,6 @@
 #include "util/events/Timeout.h"
 #include "util/events/Time.h"
 
-#include "util/platform/libc/string.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -52,9 +51,17 @@ struct Janitor
 
     struct SearchRunner* searchRunner;
 
+    // Externally accessible RumorMill.
+    // Used for direct peers and search results that are closer than the responder.
     struct RumorMill* rumorMill;
 
-    struct RumorMill* nodesOfInterest;
+    // High priority RumorMill.
+    // Used when the response could help split non-one-hop links.
+    struct RumorMill* splitMill;
+
+    // Low priority RumorMill.
+    // Used to explore physically nearby nodes. By far the most used mill.
+    struct RumorMill* idleMill;
 
     struct Timeout* timeout;
 
@@ -78,6 +85,7 @@ struct Janitor
 
     // Used to keep dht healthy
     uint8_t keyspaceMaintainenceCounter;
+    uint8_t keyspaceHoleDepthCounter;
 
     Identity
 };
@@ -190,13 +198,14 @@ static void searchNoDupe(uint8_t target[Address_SEARCH_TARGET_SIZE], struct Jani
  * bitwise over keyspace, to identify the same kind of routing holes.
  * It then dispatches a search for the first (largest) such hole in keyspace that it finds.
  */
-static void plugLargestKeyspaceHole(struct Janitor* janitor)
+static void plugLargestKeyspaceHole(struct Janitor* janitor, bool force)
 {
     struct Address addr = *janitor->nodeStore->selfAddress;
 
     int byte = 0;
     int bit = 0;
-    for (int i = 0; i < 128 ; i++) {
+    uint8_t holeDepth = 0;
+    for (uint8_t i = 0; i < 128 ; i++) {
         // Bitwise walk across keyspace
         if (63 < i && i < 72) {
             // We want to leave the 0xfc alone
@@ -210,23 +219,28 @@ static void plugLargestKeyspaceHole(struct Janitor* janitor)
         bit = (i % 8);
 
         // Flip that bit.
-        addr.ip6.bytes[byte] = addr.ip6.bytes[byte] ^ (0x01 << bit);
+        addr.ip6.bytes[byte] = addr.ip6.bytes[byte] ^ (0x80 >> bit);
 
         // See if we know a valid next hop.
         struct Node_Two* n = RouterModule_lookup(addr.ip6.bytes, janitor->routerModule);
 
         if (n) {
-            //We do know a valid next hop, so flip the bit back and continue.
-            addr.ip6.bytes[byte] = addr.ip6.bytes[byte] ^ (0x01 << bit);
+            // We do know a valid next hop, so flip the bit back and continue.
+            addr.ip6.bytes[byte] = addr.ip6.bytes[byte] ^ (0x80 >> bit);
             continue;
         }
 
         // We found a hole! Exit loop and let the search trigger.
+        holeDepth = i;
         break;
     }
 
     // Search for a node that satisfies the address requirements to fill the hole.
-    searchNoDupe(addr.ip6.bytes, janitor);
+    if (holeDepth != janitor->keyspaceHoleDepthCounter || force) {
+        Log_debug(janitor->logger, "Setting keyspaceHoleDepthCounter [%u]", holeDepth);
+        janitor->keyspaceHoleDepthCounter = holeDepth;
+        searchNoDupe(addr.ip6.bytes, janitor);
+    }
 }
 
 // Counterpart to plugLargestKeyspaceHole, used to refresh reach of known routes with a search.
@@ -260,7 +274,7 @@ static void keyspaceMaintainence(struct Janitor* janitor)
         bit = (i % 8);
 
         // Flip that bit.
-        addr.ip6.bytes[byte] = addr.ip6.bytes[byte] ^ (0x01 << bit);
+        addr.ip6.bytes[byte] = addr.ip6.bytes[byte] ^ (0x80 >> bit);
 
         // See if we know a valid next hop.
         struct Node_Two* n = RouterModule_lookup(addr.ip6.bytes, janitor->routerModule);
@@ -272,7 +286,7 @@ static void keyspaceMaintainence(struct Janitor* janitor)
         }
 
         // Clean up address and move further into keyspace.
-        addr.ip6.bytes[byte] = addr.ip6.bytes[byte] ^ (0x01 << bit);
+        addr.ip6.bytes[byte] = addr.ip6.bytes[byte] ^ (0x80 >> bit);
         continue;
     }
 
@@ -292,10 +306,61 @@ static void peersResponseCallback(struct RouterModule_Promise* promise,
     struct Address_List* addresses =
         ReplySerializer_parse(from, result, janitor->logger, promise->alloc);
 
+    struct Node_Two* parent = NodeStore_nodeForAddr(janitor->nodeStore, from->ip6.bytes);
+    if (!parent) { return; }
+
+    // Figure out if this node has any split-able links.
+    bool hasSplitableLinks = false;
+    struct Node_Link* link = NodeStore_nextLink(parent, NULL);
+    while (link) {
+        if (!Node_isOneHopLink(link)) {
+            hasSplitableLinks = true;
+            break;
+        }
+        link = NodeStore_nextLink(parent, link);
+    }
+
+    int loopCount = 0;
     for (int i = 0; addresses && i < addresses->length; i++) {
-        struct Node_Two* nn = NodeStore_nodeForPath(janitor->nodeStore, addresses->elems[i].path);
-        if (!nn) {
-            RumorMill_addNode(janitor->rumorMill, &addresses->elems[i]);
+        struct Node_Link* nl = NodeStore_linkForPath(janitor->nodeStore, addresses->elems[i].path);
+        if (!nl) {
+            addresses->elems[i].path = NodeStore_optimizePath(janitor->nodeStore,
+                                                              addresses->elems[i].path);
+            if (hasSplitableLinks) {
+                RumorMill_addNode(janitor->splitMill, &addresses->elems[i]);
+            } else {
+                RumorMill_addNode(janitor->idleMill, &addresses->elems[i]);
+            }
+        } else if (!Address_isSameIp(&addresses->elems[i], &nl->child->address)) {
+            // they're telling us about themselves, how helpful...
+            if (nl && nl->child == parent) { continue; }
+            if (nl->parent != parent) {
+                #ifdef Log_INFO
+                    uint8_t newAddr[60];
+                    Address_print(newAddr, from);
+                    uint8_t labelStr[20];
+                    AddrTools_printPath(labelStr, nl->cannonicalLabel);
+                    Log_info(janitor->logger, "Apparently [%s] reported [%s] as it's peer",
+                             newAddr, labelStr);
+                #endif
+                continue;
+            }
+            #ifdef Log_INFO
+                uint8_t newAddr[60];
+                Address_print(newAddr, from);
+                Log_info(janitor->logger, "Apparently [%s] has renumbered it's switch", newAddr);
+            #endif
+            link = NodeStore_nextLink(parent, NULL);
+            while (link) {
+                struct Node_Link* nextLink = NodeStore_nextLink(parent, link);
+                NodeStore_unlinkNodes(janitor->nodeStore, link);
+                link = nextLink;
+                // restart from the beginning...
+                i = 0;
+                Assert_true(!loopCount);
+            }
+            Assert_true(!NodeStore_nextLink(parent, NULL));
+            loopCount++;
         }
     }
 }
@@ -303,16 +368,19 @@ static void peersResponseCallback(struct RouterModule_Promise* promise,
 static void checkPeers(struct Janitor* janitor, struct Node_Two* n)
 {
     // Lets check for non-one-hop links at each node along the path between us and this node.
-    uint32_t i = 0;
-    for (;;i++) {
-        struct Node_Link* link =
-            NodeStore_getLinkOnPath(janitor->nodeStore, n->address.path, i);
+    uint64_t path = n->address.path;
+
+    struct Node_Link* link = NULL;
+
+    for (;;) {
+        link = NodeStore_firstHopInPath(janitor->nodeStore, path, &path, link);
         if (!link) { return; }
         if (link->parent == janitor->nodeStore->selfNode) { continue; }
-        int count = NodeStore_linkCount(link->child);
-        for (int j = 0; j < count; j++) {
-            struct Node_Link* l = NodeStore_getLink(link->child, j);
-            if (!Node_isOneHopLink(l) || link->parent->pathQuality == 0) {
+
+        struct Node_Link* l = NULL;
+        do {
+            l = NodeStore_nextLink(link->child, l);
+            if (l && (!Node_isOneHopLink(l) || Node_getReach(link->parent) == 0)) {
                 struct RouterModule_Promise* rp =
                     RouterModule_getPeers(&link->parent->address, l->cannonicalLabel, 0,
                                           janitor->routerModule, janitor->allocator);
@@ -321,7 +389,29 @@ static void checkPeers(struct Janitor* janitor, struct Node_Two* n)
                 // Only send max 1 getPeers req per second.
                 return;
             }
+        } while (l);
+    }
+}
+
+// Iterate over all nodes in the table. Try to split any split-able links.
+static void splitLinks(struct Janitor* janitor)
+{
+    uint32_t index = 0;
+    struct Node_Two* node = NodeStore_dumpTable(janitor->nodeStore, index);
+    while (node) {
+        struct Node_Link* bestParent = Node_getBestParent(node);
+        if (bestParent) {
+            struct Node_Link* link = NodeStore_nextLink(node, NULL);
+            while (link) {
+                if (!Node_isOneHopLink(link)) {
+                    RumorMill_addNode(janitor->splitMill, &node->address);
+                    break;
+                }
+                link = NodeStore_nextLink(node, link);
+            }
         }
+        index++;
+        node = NodeStore_dumpTable(janitor->nodeStore, index);
     }
 }
 
@@ -346,8 +436,8 @@ static void maintanenceCycle(void* vcontext)
 
     struct Address addr = { .protocolVersion = 0 };
 
-    // ping a node from the ping queue
-    if (RumorMill_getNode(janitor->rumorMill, &addr)) {
+    if (RumorMill_getNode(janitor->splitMill, &addr)) {
+        // ping a link-splitting node from the high-priority ping queue
         addr.path = NodeStore_optimizePath(janitor->nodeStore, addr.path);
         if (NodeStore_optimizePath_INVALID != addr.path) {
             struct RouterModule_Promise* rp =
@@ -362,21 +452,51 @@ static void maintanenceCycle(void* vcontext)
             #ifdef Log_DEBUG
                 uint8_t addrStr[60];
                 Address_print(addrStr, &addr);
-                Log_debug(janitor->logger, "Pinging possible node [%s] from RumorMill", addrStr);
+                Log_debug(janitor->logger, "Pinging possible node [%s] from "
+                                           "priority RumorMill", addrStr);
+            #endif
+        }
+    } else if (RumorMill_getNode(janitor->rumorMill, &addr)) {
+        // ping a node from the ping normal-priority queue
+        addr.path = NodeStore_optimizePath(janitor->nodeStore, addr.path);
+        if (NodeStore_optimizePath_INVALID != addr.path) {
+            struct RouterModule_Promise* rp =
+                RouterModule_getPeers(&addr,
+                                      Random_uint32(janitor->rand),
+                                      0,
+                                      janitor->routerModule,
+                                      janitor->allocator);
+            rp->callback = peersResponseCallback;
+            rp->userData = janitor;
+
+            #ifdef Log_DEBUG
+                uint8_t addrStr[60];
+                Address_print(addrStr, &addr);
+                Log_debug(janitor->logger, "Pinging possible node [%s] from "
+                                           "normal RumorMill", addrStr);
+            #endif
+        }
+    } else if (RumorMill_getNode(janitor->idleMill, &addr)) {
+        // ping a node from the low-priority ping queue
+        addr.path = NodeStore_optimizePath(janitor->nodeStore, addr.path);
+        if (NodeStore_optimizePath_INVALID != addr.path) {
+            struct RouterModule_Promise* rp =
+                RouterModule_getPeers(&addr,
+                                      Random_uint32(janitor->rand),
+                                      0,
+                                      janitor->routerModule,
+                                      janitor->allocator);
+            rp->callback = peersResponseCallback;
+            rp->userData = janitor;
+
+            #ifdef Log_DEBUG
+                uint8_t addrStr[60];
+                Address_print(addrStr, &addr);
+                Log_debug(janitor->logger, "Pinging possible node [%s] from "
+                                           "idle RumorMill", addrStr);
             #endif
         }
     }
-
-    /* shitstorm of search traffic
-
-    // This is good for DHT health. See function description.
-    plugLargestKeyspaceHole(janitor);
-
-    // Do something useful for a node we're actively trying to communicate with.
-    if (RumorMill_getNode(janitor->nodesOfInterest, &addr)) {
-        searchNoDupe(addr.ip6.bytes, janitor);
-    }
-    */
 
     // random search
     Random_bytes(janitor->rand, addr.ip6.bytes, 16);
@@ -386,14 +506,16 @@ static void maintanenceCycle(void* vcontext)
     struct Node_Two* n = RouterModule_lookup(addr.ip6.bytes, janitor->routerModule);
 
     // If the best next node doesn't exist or has 0 reach, run a local maintenance search.
-    if (n == NULL || n->pathQuality == 0) {
+    if (n == NULL || Node_getReach(n) == 0) {
         //search(addr.ip6.bytes, janitor);
-        plugLargestKeyspaceHole(janitor);
+        plugLargestKeyspaceHole(janitor, true);
         return;
 
     } else {
         checkPeers(janitor, n);
     }
+
+    plugLargestKeyspaceHole(janitor, false);
 
     Log_debug(janitor->logger,
               "Global Mean Response Time: %u nodes [%d] links [%d]",
@@ -403,7 +525,9 @@ static void maintanenceCycle(void* vcontext)
 
     if (now > janitor->timeOfNextGlobalMaintainence) {
         //search(addr.ip6.bytes, janitor);
+        plugLargestKeyspaceHole(janitor, true);
         keyspaceMaintainence(janitor);
+        splitLinks(janitor);
         janitor->timeOfNextGlobalMaintainence += janitor->globalMaintainenceMilliseconds;
     }
 }
@@ -414,7 +538,6 @@ struct Janitor* Janitor_new(uint64_t localMaintainenceMilliseconds,
                             struct NodeStore* nodeStore,
                             struct SearchRunner* searchRunner,
                             struct RumorMill* rumorMill,
-                            struct RumorMill* nodesOfInterest,
                             struct Log* logger,
                             struct Allocator* allocator,
                             struct EventBase* eventBase,
@@ -427,15 +550,19 @@ struct Janitor* Janitor_new(uint64_t localMaintainenceMilliseconds,
         .nodeStore = nodeStore,
         .searchRunner = searchRunner,
         .rumorMill = rumorMill,
-        .nodesOfInterest = nodesOfInterest,
         .logger = logger,
         .globalMaintainenceMilliseconds = globalMaintainenceMilliseconds,
         .localMaintainenceMilliseconds = localMaintainenceMilliseconds,
         .keyspaceMaintainenceCounter = 0,
+        .keyspaceHoleDepthCounter = 0,
         .allocator = alloc,
         .rand = rand
     }));
     Identity_set(janitor);
+
+    janitor->splitMill = RumorMill_new(janitor->allocator, janitor->nodeStore->selfAddress, 16);
+
+    janitor->idleMill = RumorMill_new(janitor->allocator, janitor->nodeStore->selfAddress, 64);
 
     janitor->timeOfNextGlobalMaintainence = Time_currentTimeMilliseconds(eventBase);
 

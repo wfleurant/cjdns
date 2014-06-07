@@ -172,7 +172,7 @@ struct Address* Address_fromString(String* str, struct Allocator* alloc)
 
     int i = 1;
     for (; str->bytes[i] && str->bytes[i] != '.'; i++) {
-        Assert_always(i < 77);
+        Assert_true(i < 77);
         if (str->bytes[i] > '9' || str->bytes[i] < '0') { return NULL; }
         addr.protocolVersion *= 10;
         addr.protocolVersion += (str->bytes[i] - '0');

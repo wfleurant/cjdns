@@ -75,7 +75,7 @@ static inline uint8_t incomingDHT(struct Message* message,
 
     DHTModuleRegistry_handleIncoming(&dht, context->registry);
 
-    // TODO: return something meaningful.
+    // TODO(cjd): return something meaningful.
     return Error_NONE;
 }
 
@@ -275,7 +275,7 @@ static inline uint8_t incomingForMe(struct Message* message,
     //Bits_memcpyConst(addr.ip6.bytes, session->ip6, 16);
     Bits_memcpyConst(addr.key, herPublicKey, 32);
     AddressCalc_addressForPublicKey(addr.ip6.bytes, herPublicKey);
-    Assert_always(!Bits_memcmp(session->ip6, addr.ip6.bytes, 16));
+    Assert_true(!Bits_memcmp(session->ip6, addr.ip6.bytes, 16));
 
     if (Bits_memcmp(addr.ip6.bytes, dtHeader->ip6Header->sourceAddr, 16)) {
         #ifdef Log_DEBUG
@@ -424,12 +424,11 @@ static uint8_t magicInterfaceSendMessage(struct Message* msg, struct Interface* 
         Identity_check((struct Ducttape_pvt*)
             &((uint8_t*)iface)[-offsetof(struct Ducttape, magicInterface)]);
 
+    Assert_ifParanoid(msg->length >= Headers_IP6Header_SIZE);
     #ifdef PARANOIA
-        Assert_true(msg->length >= Headers_IP6Header_SIZE);
         struct Headers_IP6Header* header = (struct Headers_IP6Header*) msg->bytes;
-
-        Assert_true(!Bits_memcmp(header->destinationAddr, ctx->myAddr.ip6.bytes, 16));
-        Assert_true(!Bits_memcmp(header->sourceAddr, FC_ONE, 16));
+        Assert_ifParanoid(!Bits_memcmp(header->destinationAddr, ctx->myAddr.ip6.bytes, 16));
+        Assert_ifParanoid(!Bits_memcmp(header->sourceAddr, FC_ONE, 16));
     #endif
 
     TUNMessageType_push(msg, Ethernet_TYPE_IP6, NULL);
@@ -493,12 +492,6 @@ static inline uint8_t incomingFromTun(struct Message* message,
     }
 
     struct Ducttape_MessageHeader* dtHeader = getDtHeader(message, true);
-
-    // Add destination to nodesOfInterest, so we can do something useful in the janitor.
-    struct Address rumorAddr = { .path = 0 };
-    Bits_memcpyConst(rumorAddr.ip6.bytes, header->destinationAddr, Address_SEARCH_TARGET_SIZE);
-    RumorMill_addNode(context->nodesOfInterest, &rumorAddr);
-
     struct Node_Two* bestNext = RouterModule_lookup(header->destinationAddr, context->routerModule);
     struct SessionManager_Session* nextHopSession;
     if (bestNext) {
@@ -643,7 +636,7 @@ static uint8_t sendToTun(struct Message* message, struct Interface* iface)
     struct Ducttape_pvt* context = Identity_check((struct Ducttape_pvt*)iface->receiverContext);
     uint16_t msgType = TUNMessageType_pop(message, NULL);
     if (msgType == Ethernet_TYPE_IP6) {
-        Assert_always(message->length >= Headers_IP6Header_SIZE);
+        Assert_true(message->length >= Headers_IP6Header_SIZE);
         struct Headers_IP6Header* header = (struct Headers_IP6Header*) message->bytes;
         if (header->sourceAddr[0] == 0xfc || header->destinationAddr[0] == 0xfc) {
             Assert_failure("you can't do that");
@@ -698,7 +691,7 @@ static inline int core(struct Message* message,
 
     if (ip6Header->hopLimit == 0) {
         Log_debug(context->logger, "DROP message because hop limit has been exceeded.\n");
-        // TODO: send back an error message in response.
+        // TODO(cjd): send back an error message in response.
         return Error_UNDELIVERABLE;
     }
     ip6Header->hopLimit--;
@@ -775,7 +768,7 @@ static inline uint8_t outgoingFromMe(struct Message* message,
 
     } else {
         // sanity check.
-        Assert_true(!Bits_memcmp(header->sourceAddr, context->myAddr.ip6.bytes, 16));
+        Assert_ifParanoid(!Bits_memcmp(header->sourceAddr, context->myAddr.ip6.bytes, 16));
     }
 
     // Need to set the length field to take into account
@@ -867,7 +860,7 @@ static uint8_t incomingFromCryptoAuth(struct Message* message, struct Interface*
             return incomingForMe(message, dtHeader, session, context,
                                  CryptoAuth_getHerPublicKey(session->internal));
         default:
-            Assert_always(false);
+            Assert_true(false);
     }
     // never reached.
     return 0;
@@ -895,7 +888,7 @@ static uint8_t outgoingFromCryptoAuth(struct Message* message, struct Interface*
         Log_debug(context->logger, "Sending layer3 message");
         return outgoingFromMe(message, dtHeader, session, context);
     } else {
-        Assert_always(0);
+        Assert_true(0);
     }
 }
 
@@ -947,12 +940,15 @@ static uint8_t handleControlMessage(struct Ducttape_pvt* context,
             }
             struct Control* causeCtrl = (struct Control*) &(&ctrl->content.error.cause)[1];
             if (causeCtrl->type_be != Control_PING_be) {
-                uint32_t errorType = Endian_bigEndianToHost32(ctrl->content.error.errorType_be);
-                Log_info(context->logger,
-                          "error packet from [%s] caused by [%s] packet ([%s])",
-                          labelStr,
-                          Control_typeString(causeCtrl->type_be),
-                          Error_strerror(errorType));
+                #ifdef Log_INFO
+                    uint32_t errorType =
+                        Endian_bigEndianToHost32(ctrl->content.error.errorType_be);
+                    Log_info(context->logger,
+                              "error packet from [%s] caused by [%s] packet ([%s])",
+                              labelStr,
+                              Control_typeString(causeCtrl->type_be),
+                              Error_strerror(errorType));
+                #endif
             } else {
                 if (LabelSplicer_isOneHop(label)
                     && ctrl->content.error.errorType_be
@@ -1200,7 +1196,6 @@ struct Ducttape* Ducttape_register(uint8_t privateKey[32],
                                    struct DHTModuleRegistry* registry,
                                    struct RouterModule* routerModule,
                                    struct SearchRunner* searchRunner,
-                                   struct RumorMill* nodesOfInterest,
                                    struct SwitchCore* switchCore,
                                    struct EventBase* eventBase,
                                    struct Allocator* allocator,
@@ -1211,7 +1206,6 @@ struct Ducttape* Ducttape_register(uint8_t privateKey[32],
     struct Ducttape_pvt* context = Allocator_calloc(allocator, sizeof(struct Ducttape_pvt), 1);
     context->registry = registry;
     context->routerModule = routerModule;
-    context->nodesOfInterest = nodesOfInterest;
     context->logger = logger;
     context->eventBase = eventBase;
     context->alloc = allocator;

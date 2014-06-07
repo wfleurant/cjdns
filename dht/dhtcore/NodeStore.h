@@ -17,6 +17,7 @@
 
 #include "dht/Address.h"
 #include "dht/dhtcore/Node.h"
+#include "dht/dhtcore/RumorMill.h"
 #include "util/log/Log.h"
 #include "memory/Allocator.h"
 #include "switch/EncodingScheme.h"
@@ -46,14 +47,13 @@ struct NodeStore
  * Create a new NodeStore.
  *
  * @param myAddress the address for this DHT node.
- * @param capacity the number of nodes which this store can hold.
  * @param allocator the allocator to allocate storage space for this NodeStore.
  * @param logger the means for this node store to log.
  */
 struct NodeStore* NodeStore_new(struct Address* myAddress,
-                                const uint32_t capacity,
                                 struct Allocator* allocator,
-                                struct Log* logger);
+                                struct Log* logger,
+                                struct RumorMill* renumberMill);
 
 /**
  * Discover a new node (or rediscover an existing one).
@@ -70,21 +70,43 @@ struct Node_Link* NodeStore_discoverNode(struct NodeStore* nodeStore,
                                          struct Address* addr,
                                          struct EncodingScheme* scheme,
                                          int inverseLinkEncodingFormNumber,
-                                         uint32_t reach);
+                                         uint64_t milliseconds);
 
 struct Node_Two* NodeStore_nodeForAddr(struct NodeStore* nodeStore, uint8_t addr[16]);
 
 struct Node_Two* NodeStore_closestNode(struct NodeStore* nodeStore, uint64_t path);
 
-struct Node_Two* NodeStore_nodeForPath(struct NodeStore* nodeStore, uint64_t path);
+struct Node_Link* NodeStore_linkForPath(struct NodeStore* nodeStore, uint64_t path);
 
-struct Node_Link* NodeStore_getLink(struct Node_Two* parent, uint32_t linkNum);
+void NodeStore_unlinkNodes(struct NodeStore* nodeStore, struct Node_Link* link);
 
-struct Node_Link* NodeStore_getLinkOnPath(struct NodeStore* nodeStore,
-                                          uint64_t routeLabel,
-                                          uint32_t hopNum);
+/**
+ * Get an outgoing link for a node.
+ *
+ * @param parent the node from which the link begins.
+ * @param startLink the link to get the next link after, if NULL the first link from the parent
+ *                  will be returned.
+ * @return the next link from the parent of NULL if there are no more links.
+ */
+struct Node_Link* NodeStore_nextLink(struct Node_Two* parent, struct Node_Link* startLink);
 
-uint32_t NodeStore_linkCount(struct Node_Two* node);
+/**
+ * Get the first peer along a path.
+ *
+ * @param nodeStore
+ * @param path the path to get the first peer along.
+ * @param correctedPath if non-null, this will be set to the path from the resulting link to the
+ *                      destination given by path. Calling this function iteratively, passing
+ *                      the result of this back to path and passing the return value as
+ *                      startingPoint will walk the path.
+ * @param startingPoint if non-null, the starting point from which path begins, otherwise it will
+ *                      be assumed to begin from the self-node.
+ * @return the first link along the path or NULL if no such link is known.
+ */
+struct Node_Link* NodeStore_firstHopInPath(struct NodeStore* nodeStore,
+                                           uint64_t path,
+                                           uint64_t* correctedPath,
+                                           struct Node_Link* startingPoint);
 
 #define NodeStore_optimizePath_INVALID (~((uint64_t)0))
 uint64_t NodeStore_optimizePath(struct NodeStore* nodeStore, uint64_t path);
@@ -157,7 +179,9 @@ struct NodeList* NodeStore_getClosestNodes(struct NodeStore* store,
                                            uint32_t versionOfRequestingNode,
                                            struct Allocator* allocator);
 
-void NodeStore_updateReach(struct NodeStore* nodeStore, struct Node_Two* node, uint32_t newReach);
+// Used to update reach when a ping/search response comes in
+void NodeStore_pathResponse(struct NodeStore* nodeStore, uint64_t path, uint64_t milliseconds);
+void NodeStore_pathTimeout(struct NodeStore* nodeStore, uint64_t path);
 
 /**
  * Remove all nodes who are reachable by this path.

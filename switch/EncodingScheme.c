@@ -129,7 +129,6 @@ uint64_t EncodingScheme_convertLabel(struct EncodingScheme* scheme,
     return routeLabel;
 }
 
-
 /**
  * Decode a form from it's binary representation.
  * Can only use a maximum of 41 bits.
@@ -228,7 +227,7 @@ bool EncodingScheme_isSane(struct EncodingScheme* scheme)
 
 List* EncodingScheme_asList(struct EncodingScheme* list, struct Allocator* alloc)
 {
-    Assert_true(EncodingScheme_isSane(list));
+    Assert_ifParanoid(EncodingScheme_isSane(list));
     String* prefixLen = String_new("prefixLen", alloc);
     String* bitCount = String_new("bitCount", alloc);
     String* prefix = String_new("prefix", alloc);
@@ -276,7 +275,7 @@ struct EncodingScheme* EncodingScheme_fromList(List* scheme, struct Allocator* a
 String* EncodingScheme_serialize(struct EncodingScheme* list,
                                  struct Allocator* alloc)
 {
-    Assert_true(EncodingScheme_isSane(list));
+    Assert_ifParanoid(EncodingScheme_isSane(list));
 
     // Create the string as the largest that is possible for the list size.
     String* out = String_newBinary(NULL, list->count * 6, alloc);
@@ -363,7 +362,7 @@ struct EncodingScheme* EncodingScheme_defineFixedWidthScheme(int bitCount, struc
     };
     Bits_memcpyConst(out, &scheme, sizeof(struct NumberCompress_FixedWidthScheme));
 
-    Assert_always(EncodingScheme_isSane(&out->scheme));
+    Assert_true(EncodingScheme_isSane(&out->scheme));
 
     return &out->scheme;
 }
@@ -382,7 +381,7 @@ struct EncodingScheme* EncodingScheme_defineDynWidthScheme(struct EncodingScheme
         .forms = formsCopy
     }));
 
-    Assert_true(EncodingScheme_isSane(scheme));
+    Assert_ifParanoid(EncodingScheme_isSane(scheme));
     return scheme;
 }
 
@@ -392,4 +391,19 @@ int EncodingScheme_compare(struct EncodingScheme* a, struct EncodingScheme* b)
         return Bits_memcmp(a->forms, b->forms, sizeof(struct EncodingScheme_Form) * a->count);
     }
     return a->count > b->count ? 1 : -1;
+}
+
+/**
+ * Return true if the route is to the switch's router interface.
+ */
+int EncodingScheme_isSelfRoute(struct EncodingScheme* scheme, uint64_t routeLabel)
+{
+    int formNum = EncodingScheme_getFormNum(scheme, routeLabel);
+    if (formNum == EncodingScheme_getFormNum_INVALID) {
+        return 0;
+    }
+
+    struct EncodingScheme_Form* currentForm = &scheme->forms[formNum];
+
+    return (routeLabel & Bits_maxBits64(currentForm->prefixLen + currentForm->bitCount)) == 1;
 }

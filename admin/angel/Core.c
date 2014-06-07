@@ -60,7 +60,7 @@
 #include "memory/MallocAllocator.h"
 #include "memory/Allocator_admin.h"
 #include "net/Ducttape.h"
-#include "net/DefaultInterfaceController.h"
+#include "interface/InterfaceController.h"
 #include "net/SwitchPinger.h"
 #include "net/SwitchPinger_admin.h"
 #include "switch/SwitchCore.h"
@@ -87,9 +87,6 @@
 // Failsafe: abort if more than 2^23 bytes are allocated (8MB)
 #define ALLOCATOR_FAILSAFE (1<<23)
 
-/** The number of nodes which we will keep track of. */
-#define NODE_STORE_SIZE 256
-
 /** The number of milliseconds between attempting local maintenance searches. */
 #define LOCAL_MAINTENANCE_SEARCH_MILLISECONDS 1000
 
@@ -108,7 +105,7 @@
  * and the CryptoAuths to both the destination and the handoff node are both timed out.
  */
 #define WORST_CASE_OVERHEAD ( \
-    /* TODO: Headers_IPv4_SIZE */ 20 \
+    /* TODO(cjd): Headers_IPv4_SIZE */ 20 \
     + Headers_UDPHeader_SIZE \
     + 4 /* Nonce */ \
     + 16 /* Poly1305 authenticator */ \
@@ -124,7 +121,7 @@
   - WORST_CASE_OVERHEAD \
   + Headers_IP6Header_SIZE /* The OS subtracts the IP6 header. */ \
   + Headers_CryptoAuth_SIZE /* Linux won't let set the MTU below 1280.
-  TODO: make sure we never hand off to a node for which the CA session is expired. */ \
+  TODO(cjd): make sure we never hand off to a node for which the CA session is expired. */ \
 )
 
 static void parsePrivateKey(uint8_t privateKey[32],
@@ -385,8 +382,9 @@ void Core_init(struct Allocator* alloc,
     struct DHTModuleRegistry* registry = DHTModuleRegistry_new(alloc);
     ReplyModule_register(registry, alloc);
 
+    struct RumorMill* rumorMill = RumorMill_new(alloc, &addr, RUMORMILL_CAPACITY);
 
-    struct NodeStore* nodeStore = NodeStore_new(&addr, NODE_STORE_SIZE, alloc, logger);
+    struct NodeStore* nodeStore = NodeStore_new(&addr, alloc, logger, rumorMill);
 
     struct RouterModule* routerModule = RouterModule_register(registry,
                                                               alloc,
@@ -395,10 +393,6 @@ void Core_init(struct Allocator* alloc,
                                                               logger,
                                                               rand,
                                                               nodeStore);
-
-    struct RumorMill* rumorMill = RumorMill_new(alloc, &addr, RUMORMILL_CAPACITY);
-
-    struct RumorMill* nodesOfInterest = RumorMill_new(alloc, &addr, RUMORMILL_CAPACITY);
 
     struct SearchRunner* searchRunner = SearchRunner_new(nodeStore,
                                                          logger,
@@ -414,7 +408,6 @@ void Core_init(struct Allocator* alloc,
                 nodeStore,
                 searchRunner,
                 rumorMill,
-                nodesOfInterest,
                 logger,
                 alloc,
                 eventBase,
@@ -430,7 +423,6 @@ void Core_init(struct Allocator* alloc,
                                             registry,
                                             routerModule,
                                             searchRunner,
-                                            nodesOfInterest,
                                             switchCore,
                                             eventBase,
                                             alloc,
@@ -443,15 +435,8 @@ void Core_init(struct Allocator* alloc,
 
     // Interfaces.
     struct InterfaceController* ifController =
-        DefaultInterfaceController_new(cryptoAuth,
-                                       switchCore,
-                                       routerModule,
-                                       rumorMill,
-                                       logger,
-                                       eventBase,
-                                       sp,
-                                       rand,
-                                       alloc);
+        InterfaceController_new(cryptoAuth, switchCore, routerModule, rumorMill,
+                                logger, eventBase, sp, rand, alloc);
 
     // ------------------- DNS -------------------------//
 
