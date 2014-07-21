@@ -183,9 +183,15 @@ meshLua_cmd = {
 								return('timeout')
 							end
 						end }
+					tab = ''
+					if node[#node].state == 'NEW' then
+						tab = '\t\t'
+					else
+						tab = '\t'
+					end
 
 					print (
-						'['..node[#node].state..'] \t'
+						'['..node[#node].state..']'..tab
 						..node[#node].ipv6..' (Up: '..node[#node].bytesOut..' / Down: '..node[#node].bytesIn..' / '
 						..'Ping: '..node[#node].pingtime[1]()..'ms / '
 						..'Mode: '..node[#node].ident[1]()..')'
