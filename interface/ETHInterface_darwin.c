@@ -59,6 +59,8 @@
 /** Wait 16 seconds between sending beacon messages. */
 #define BEACON_INTERVAL 32768
 
+ int buf_len = 1;
+
 struct ETHInterface
 {
     struct Interface generic;
@@ -225,16 +227,18 @@ static void handleEvent2(struct ETHInterface* context, struct Allocator* message
     // aligned when the idAndPadding is shifted off.
     Message_shift(msg, 2, NULL);
 
-    int rc = read(context->bpf, msg->bytes, msg->length);
+    int rc = read(context->bpf, msg->bytes, buf_len); // buf_len = 1
 
     if (rc < 0) {
-        Log_debug(context->logger, "Failed to receive eth frame");
+        Log_debug(context->logger, "Failed to receive eth frame: %s", strerror(errno));
         return;
     }
 
+    Log_debug(context->logger, "Read %d bytes", rc);
+
     // extract bpf header
     struct bpf_hdr bpfhdr;
-    Message_pop(msg, &bpfhdr, ((struct bpf_hdr*)msg)->bh_hdrlen, NULL);
+    Message_pop(msg, &bpfhdr, ((struct bpf_hdr*)msg->bytes)->bh_hdrlen, NULL);
 
     // extract ethernet header
     struct ether_header ethHdr;
@@ -346,7 +350,7 @@ struct ETHInterface* ETHInterface_new(struct EventBase* base,
 
     for (int i = 0; i < 99; i++) {
         sprintf( buf, "/dev/bpf%i", i );
-        context->bpf = open(buf, O_RDWR | O_NONBLOCK);
+        context->bpf = open(buf, O_RDWR);
         if (context->bpf != -1) {
             break;
         }
@@ -356,7 +360,6 @@ struct ETHInterface* ETHInterface_new(struct EventBase* base,
         Except_throw(exHandler, "failed to open bpf device.");
     }
 
-    int buf_len = 1;
     // activate immediate mode (therefore, buf_len is initially set to "1")
     if (ioctl(context->bpf, BIOCIMMEDIATE, &buf_len) == -1) {
         Except_throw(exHandler, "BIOCIMMEDIATE failed [%s]", strerror(errno));
@@ -371,7 +374,8 @@ struct ETHInterface* ETHInterface_new(struct EventBase* base,
     // filter for cjdns ethertype (0xfc00)
     struct bpf_insn insns[] = {
         BPF_STMT(BPF_LD+BPF_H+BPF_ABS, 12),
-        BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, Ethernet_TYPE_CJDNS, 0, 1),
+        BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, 0xfc00, 0, 1),
+        //BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, Ethernet_TYPE_CJDNS, 0, 1),
         BPF_STMT(BPF_RET+BPF_K, MAX_PACKET_SIZE),
         BPF_STMT(BPF_RET+BPF_K, 0),
     };
