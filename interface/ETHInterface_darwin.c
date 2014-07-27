@@ -59,25 +59,20 @@
 /** Wait 16 seconds between sending beacon messages. */
 #define BEACON_INTERVAL 32768
 
- int buf_len = 1;
+int buf_len = 1;
 
 struct ETHInterface
 {
     struct Interface generic;
-
     int bpf;
-
     uint8_t messageBuff[PADDING + MAX_PACKET_SIZE];
-
+    int buf_len;
     struct Log* logger;
-
     struct InterfaceController* ic;
-
     struct MultiInterface* multiIface;
-
     uint8_t ethAddr[6];
-
     int beaconState;
+    struct sockaddr_dl addrBase;
 
     /**
      * A unique(ish) id which will be different every time the router starts.
@@ -86,6 +81,13 @@ struct ETHInterface
     uint16_t id;
 
     Identity
+};
+
+struct ethernet_frame
+{
+    unsigned char dest_addr[ 6 ];
+    unsigned char src_addr[ 6 ];
+    unsigned short int type;
 };
 
 static uint8_t sendMessage(struct Message* message, struct Interface* ethIf)
@@ -139,29 +141,45 @@ static uint8_t sendMessage(struct Message* message, struct Interface* ethIf)
 
 static void handleBeacon(struct Message* msg, struct ETHInterface* context)
 {
-    /*
     if (!context->beaconState) {
         // accepting beacons disabled.
         Log_debug(context->logger, "Dropping beacon because beaconing is disabled");
         return;
     }
 
-    struct sockaddr_ll addr;
-    Bits_memcpyConst(&addr, &context->addrBase, sizeof(struct sockaddr_ll));
-    Message_pop(msg, addr.sll_addr, 8, NULL);
+    //struct sockaddr_dl addr;
+    //Bits_memcpyConst(&addr, &context->addrBase, sizeof(struct sockaddr_dl));
+    //unit8_t* MAC = addr
+    //uint8_t* MAC = LLADDR(&addr);
+
+    //printf("MAC = %02x:%02x:%02x:%02x:%02x:%02x\n",
+    //    MAC[0], MAC[1], MAC[2], MAC[3], MAC[4], MAC[5]);
+
+//    uint8_t* dst = 0;
+//    uint8_t* src = 0;
+
+    unsigned char src[6];
+
+    Message_pop(msg, src, 6, NULL);
+
     if (msg->length < Headers_Beacon_SIZE) {
         // Oversize messages are ok because beacons may contain more information in the future.
         Log_debug(context->logger, "Dropping wrong size beacon, expected [%d] got [%d]",
                   Headers_Beacon_SIZE, msg->length);
         return;
     }
+
     struct Headers_Beacon* beacon = (struct Headers_Beacon*) msg->bytes;
 
     uint32_t theirVersion = Endian_bigEndianToHost32(beacon->version_be);
     if (!Version_isCompatible(theirVersion, Version_CURRENT_PROTOCOL)) {
         #ifdef Log_DEBUG
             uint8_t mac[18];
-            AddrTools_printMac(mac, addr.sll_addr);
+            snprintf((char*)mac,
+                18,
+                "%02x:%02x:%02x:%02x:%02x:%02x\n",
+                src[0], src[1], src[2], src[3], src[4], src[5]);
+            //AddrTools_printMac(mac, addr.sll_addr);
             Log_debug(context->logger, "Dropped beacon from [%s] which was version [%d] "
                       "our version is [%d] making them incompatable",
                       mac, theirVersion, Version_CURRENT_PROTOCOL);
@@ -171,12 +189,16 @@ static void handleBeacon(struct Message* msg, struct ETHInterface* context)
 
     #ifdef Log_DEBUG
         uint8_t mac[18];
-        AddrTools_printMac(mac, addr.sll_addr);
+        //AddrTools_printMac(mac, addr.sll_addr);
+        snprintf((char*)mac,
+            18,
+            "%02x:%02x:%02x:%02x:%02x:%02x\n",
+            src[0], src[1], src[2], src[3], src[4], src[5]);
         Log_debug(context->logger, "Got beacon from [%s]", mac);
     #endif
 
     String passStr = { .bytes = (char*) beacon->password, .len = Headers_Beacon_PASSWORD_LEN };
-    struct Interface* iface = MultiInterface_ifaceForKey(context->multiIface, addr.sll_addr);
+    struct Interface* iface = MultiInterface_ifaceForKey(context->multiIface, src);
     int ret = InterfaceController_registerPeer(context->ic,
                                                beacon->publicKey,
                                                &passStr,
@@ -184,11 +206,11 @@ static void handleBeacon(struct Message* msg, struct ETHInterface* context)
                                                true,
                                                iface);
     if (ret != 0) {
-        uint8_t mac[18];
-        AddrTools_printMac(mac, addr.sll_addr);
-        Log_info(context->logger, "Got beacon from [%s] and registerPeer returned [%d]", mac, ret);
+//        uint8_t mac[18];
+//        AddrTools_printMac(mac, addr.sll_addr);
+//  Log_info(context->logger, "Got beacon from [%s] and registerPeer returned [%d]", mac, ret);
     }
-    */
+
 }
 
 static void sendBeacon(void* vcontext)
@@ -286,11 +308,20 @@ int ETHInterface_beginConnection(const char* macAddress,
                                  uint8_t cryptoKey[32],
                                  String* password,
                                  struct ETHInterface* ethIf)
-{ /*
+{
     Identity_check(ethIf);
-    struct sockaddr_ll addr;
-    Bits_memcpyConst(&addr, &ethIf->addrBase, sizeof(struct sockaddr_ll));
-    if (AddrTools_parseMac(addr.sll_addr, (const uint8_t*)macAddress)) {
+
+    struct sockaddr_dl addr;
+    Bits_memcpyConst(&addr, &ethIf->addrBase, sizeof(struct sockaddr_dl));
+    uint8_t* MAC = LLADDR(&addr);
+
+    printf("MAC = %02x:%02x:%02x:%02x:%02x:%02x\n",
+        MAC[0], MAC[1], MAC[2], MAC[3], MAC[4], MAC[5]);
+
+
+    printf("connection!\n");
+    //Bits_memcpyConst(&addr, &ethIf->addrBase, sizeof(struct sockaddr_dl));
+    if (AddrTools_parseMac(MAC, (const uint8_t*)macAddress)) {
         return ETHInterface_beginConnection_BAD_MAC;
     }
 
@@ -309,7 +340,7 @@ int ETHInterface_beginConnection(const char* macAddress,
               return ETHInterface_beginConnection_UNKNOWN_ERROR;
         }
     }
-    */
+
     return 0;
 }
 
@@ -340,7 +371,8 @@ struct ETHInterface* ETHInterface_new(struct EventBase* base,
         },
         .logger = logger,
         .ic = ic,
-        .id = getpid()
+        .id = getpid(),
+        .buf_len = 1
     }));
 
     Identity_set(context);
