@@ -60,8 +60,6 @@
 /** Wait 16 seconds between sending beacon messages. */
 #define BEACON_INTERVAL 32768
 
-int buf_len = 1;
-
 struct ETHInterface
 {
     struct Interface generic;
@@ -84,13 +82,6 @@ struct ETHInterface
     Identity
 };
 
-struct ethernet_frame
-{
-    unsigned char dest_addr[ 6 ];
-    unsigned char src_addr[ 6 ];
-    unsigned short int type;
-};
-
 static uint8_t sendMessage(struct Message* message, struct Interface* ethIf)
 {
     struct ETHInterface* context = Identity_check((struct ETHInterface*) ethIf);
@@ -109,12 +100,14 @@ static uint8_t sendMessage(struct Message* message, struct Interface* ethIf)
     for (int length = message->length; length+2 < MIN_PACKET_SIZE; length += 8) {
         pad++;
     }
+
     if (pad > 0) {
         int length = message->length;
         Message_shift(message, pad*8, NULL);
         Bits_memset(message->bytes, 0, pad*8);
         Bits_memmove(message->bytes, &message->bytes[pad*8], length);
     }
+
     Assert_true(pad < 8);
     uint16_t padAndId_be = Endian_hostToBigEndian16((context->id << 3) | pad);
     Message_push(message, &padAndId_be, 2, NULL);
@@ -142,26 +135,15 @@ static uint8_t sendMessage(struct Message* message, struct Interface* ethIf)
 
 static void handleBeacon(struct Message* msg, struct ETHInterface* context)
 {
+    uint8_t binmac[6];
+
     if (!context->beaconState) {
         // accepting beacons disabled.
         Log_debug(context->logger, "Dropping beacon because beaconing is disabled");
         return;
     }
 
-    //struct sockaddr_dl addr;
-    //Bits_memcpyConst(&addr, &context->addrBase, sizeof(struct sockaddr_dl));
-    //unit8_t* MAC = addr
-    //uint8_t* MAC = LLADDR(&addr);
-
-    //printf("MAC = %02x:%02x:%02x:%02x:%02x:%02x\n",
-    //    MAC[0], MAC[1], MAC[2], MAC[3], MAC[4], MAC[5]);
-
-//    uint8_t* dst = 0;
-//    uint8_t* src = 0;
-
-    unsigned char src[6];
-
-    Message_pop(msg, src, 6, NULL);
+    Message_pop(msg, binmac, 6, NULL);
 
     if (msg->length < Headers_Beacon_SIZE) {
         // Oversize messages are ok because beacons may contain more information in the future.
@@ -176,7 +158,7 @@ static void handleBeacon(struct Message* msg, struct ETHInterface* context)
     if (!Version_isCompatible(theirVersion, Version_CURRENT_PROTOCOL)) {
         #ifdef Log_DEBUG
             uint8_t mac[18];
-            AddrTools_printMac(mac, src);
+            AddrTools_printMac(mac, binmac);
             Log_debug(context->logger, "Dropped beacon from [%s] which was version [%d] "
                       "our version is [%d] making them incompatable",
                       mac, theirVersion, Version_CURRENT_PROTOCOL);
@@ -186,7 +168,7 @@ static void handleBeacon(struct Message* msg, struct ETHInterface* context)
 
     #ifdef Log_DEBUG
         uint8_t mac[18];
-        AddrTools_printMac(mac, src);
+        AddrTools_printMac(mac, binmac);
         uint8_t publicKey[52];
         uint8_t publicKeyHex[128];
         Base32_encode(publicKey, 52, beacon->publicKey, 32);
@@ -196,7 +178,7 @@ static void handleBeacon(struct Message* msg, struct ETHInterface* context)
     #endif
 
     String passStr = { .bytes = (char*) beacon->password, .len = Headers_Beacon_PASSWORD_LEN };
-    struct Interface* iface = MultiInterface_ifaceForKey(context->multiIface, src);
+    struct Interface* iface = MultiInterface_ifaceForKey(context->multiIface, binmac);
     int ret = InterfaceController_registerPeer(context->ic,
                                                beacon->publicKey,
                                                &passStr,
@@ -205,7 +187,7 @@ static void handleBeacon(struct Message* msg, struct ETHInterface* context)
                                                iface);
     if (ret != 0) {
         uint8_t mac[18];
-        AddrTools_printMac(mac, src);
+        AddrTools_printMac(mac, binmac);
         Log_info(context->logger, "Got beacon from [%s] and registerPeer returned [%d]", mac, ret);
     }
 
@@ -252,7 +234,7 @@ static void handleEvent2(struct ETHInterface* context, struct Allocator* message
     // aligned when the idAndPadding is shifted off.
     Message_shift(msg, 2, NULL);
 
-    int rc = read(context->bpf, msg->bytes, buf_len); // buf_len = 1
+    int rc = read(context->bpf, msg->bytes, context->buf_len);
 
     if (rc < 0) {
         Log_debug(context->logger, "Failed to receive eth frame: %s", strerror(errno));
@@ -301,7 +283,6 @@ static void handleEvent2(struct ETHInterface* context, struct Allocator* message
 static void handleEvent(void* vcontext)
 {
     struct ETHInterface* context = Identity_check((struct ETHInterface*) vcontext);
-    Log_debug(context->logger, "handleEvent()");
     struct Allocator* messageAlloc = Allocator_child(context->generic.allocator);
     handleEvent2(context, messageAlloc);
     Allocator_free(messageAlloc);
@@ -321,8 +302,6 @@ int ETHInterface_beginConnection(const char* macAddress,
     printf("MAC = %02x:%02x:%02x:%02x:%02x:%02x\n",
             MAC[0], MAC[1], MAC[2], MAC[3], MAC[4], MAC[5]);
 
-
-    printf("connection!\n");
     //Bits_memcpyConst(&addr, &ethIf->addrBase, sizeof(struct sockaddr_dl));
     if (AddrTools_parseMac(MAC, (const uint8_t*)macAddress)) {
         return ETHInterface_beginConnection_BAD_MAC;
@@ -396,21 +375,20 @@ struct ETHInterface* ETHInterface_new(struct EventBase* base,
     }
 
     // activate immediate mode (therefore, buf_len is initially set to "1")
-    if (ioctl(context->bpf, BIOCIMMEDIATE, &buf_len) == -1) {
+    if (ioctl(context->bpf, BIOCIMMEDIATE, &context->buf_len) == -1) {
         Except_throw(exHandler, "BIOCIMMEDIATE failed [%s]", strerror(errno));
     }
 
     // request buffer length
-    if (ioctl(context->bpf, BIOCGBLEN, &buf_len) == -1) {
+    if (ioctl(context->bpf, BIOCGBLEN, &context->buf_len) == -1) {
         Except_throw(exHandler, "BIOCGBLEN failed [%s]", strerror(errno));
     }
-    Log_debug(context->logger, "ioctl BIOCGBLEN buf_len = %i", buf_len);
+    Log_debug(context->logger, "ioctl BIOCGBLEN buf_len = %i", context->buf_len);
 
     // filter for cjdns ethertype (0xfc00)
     struct bpf_insn insns[] = {
         BPF_STMT(BPF_LD+BPF_H+BPF_ABS, 12),
         BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, 0xfc00, 0, 1),
-        //BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, Ethernet_TYPE_CJDNS, 0, 1),
         BPF_STMT(BPF_RET+BPF_K, MAX_PACKET_SIZE),
         BPF_STMT(BPF_RET+BPF_K, 0),
     };
