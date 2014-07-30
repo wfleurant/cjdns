@@ -89,11 +89,16 @@ var compiler = function (compilerPath, args, callback, content) {
         }));
 
         gcc.on('error', function(err) {
-            // handle the error safely
-            console.log(args);
-            console.log(err);
+          if ('ENOENT' === err.code) {
+              console.error('\033[1;31mError: '+compilerPath+' is required!\033[0m');
+          }
+          else {
+              console.error('\033[1;31mFail run '+process.cwd()+': '+compilerPath+' '+args.join(' ')+'\033[0m');
+              console.error('Message:', err);
+          }
+          // handle the error safely
+          console.log(args);
         });
-
         if (content) {
             gcc.stdin.write(content, function (err) {
                 if (err) { throw err; }
@@ -130,7 +135,9 @@ var mkBuilder = function (state) {
             if (!outputFile) {
                 outputFile = cFile.replace(/^.*\/([^\/\.]*).*$/, function (a,b) { return b; });
             }
-            if (state.system === 'win32' && !(/\.exe$/.test(outputFile))) { outputFile += '.exe'; }
+            if (state.systemName === 'win32' && !(/\.exe$/.test(outputFile))) {
+                outputFile += '.exe';
+            }
             var temp = state.buildDir+'/'+getExecutableFile(cFile);
             compile(cFile, temp, builder, builder.waitFor());
             builder.executables.push([temp, outputFile]);
@@ -627,7 +634,7 @@ var getStatePrototype = function (params) {
 
         tempDir: '/tmp',
 
-        system: 'linux'
+        systemName: 'linux'
     }, params);
 };
 
@@ -678,13 +685,11 @@ var configure = module.exports.configure = function (params, configFunc) {
     var time = makeTime();
     time();
 
-    if (typeof(params.system) !== 'string') {
+    if (typeof(params.systemName) !== 'string') {
         throw new Error("system not specified");
     }
-    // TODO(cjd): deprecated name
-    params.systemName = params.system;
 
-    params.buildDir = params.buildDir || 'build_' + params.system;
+    params.buildDir = params.buildDir || 'build_' + params.systemName;
 
     var state;
     var builder;
