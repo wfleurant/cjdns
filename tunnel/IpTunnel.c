@@ -17,12 +17,10 @@
 #include "benc/Dict.h"
 #include "benc/List.h"
 #include "benc/Int.h"
-#include "benc/serialization/standard/StandardBencSerializer.h"
-#include "benc/serialization/BencSerializer.h"
+#include "benc/serialization/standard/BencMessageWriter.h"
+#include "benc/serialization/standard/BencMessageReader.h"
 #include "crypto/random/Random.h"
 #include "exception/Jmp.h"
-#include "io/ArrayWriter.h"
-#include "io/ArrayReader.h"
 #include "interface/tuntap/TUNMessageType.h"
 #include "memory/Allocator.h"
 #include "tunnel/IpTunnel.h"
@@ -169,31 +167,23 @@ static uint8_t sendControlMessage(Dict* dict,
                                   struct Allocator* requestAlloc,
                                   struct IpTunnel_pvt* context)
 {
-    struct Message* message = Message_new(512, 512, requestAlloc);
+    struct Message* msg = Message_new(0, 1024, requestAlloc);
+    BencMessageWriter_write(dict, msg, NULL);
 
-    struct Writer* w = ArrayWriter_new(message->bytes, message->length, requestAlloc);
-    StandardBencSerializer_get()->serializeDictionary(w, dict);
-    message->length = w->bytesWritten;
-
-    #ifdef Log_DEBUG
-        message->bytes[message->length] = '\0';
-        uint8_t addr[40];
-        AddrTools_printIp(addr, connection->header.nodeIp6Addr);
-        Log_debug(context->logger, "Send message to [%s] with content [%s]", addr, message->bytes);
-    #endif
+    int length = msg->length;
 
     // do UDP header.
-    Message_shift(message, Headers_UDPHeader_SIZE, NULL);
-    struct Headers_UDPHeader* uh = (struct Headers_UDPHeader*) message->bytes;
+    Message_shift(msg, Headers_UDPHeader_SIZE, NULL);
+    struct Headers_UDPHeader* uh = (struct Headers_UDPHeader*) msg->bytes;
     uh->srcPort_be = 0;
     uh->destPort_be = 0;
-    uh->length_be = Endian_hostToBigEndian16(w->bytesWritten);
+    uh->length_be = Endian_hostToBigEndian16(length);
     uh->checksum_be = 0;
 
-    uint16_t payloadLength = message->length;
+    uint16_t payloadLength = msg->length;
 
-    Message_shift(message, Headers_IP6Header_SIZE, NULL);
-    struct Headers_IP6Header* header = (struct Headers_IP6Header*) message->bytes;
+    Message_shift(msg, Headers_IP6Header_SIZE, NULL);
+    struct Headers_IP6Header* header = (struct Headers_IP6Header*) msg->bytes;
     header->versionClassAndFlowLabel = 0;
     header->flowLabelLow_be = 0;
     header->nextHeader = 17;
@@ -206,9 +196,9 @@ static uint8_t sendControlMessage(Dict* dict,
 
     uh->checksum_be = Checksum_udpIp6(header->sourceAddr,
                                       (uint8_t*) uh,
-                                      message->length - Headers_IP6Header_SIZE);
+                                      msg->length - Headers_IP6Header_SIZE);
 
-    return sendToNode(message, connection, context);
+    return sendToNode(msg, connection, context);
 }
 
 static uint8_t requestAddresses(struct IpTunnel_Connection* conn,
@@ -498,11 +488,10 @@ static uint8_t incomingControlMessage(struct Message* message,
 
     struct Allocator* alloc = Allocator_child(message->alloc);
 
-    struct Reader* r = ArrayReader_new(message->bytes, message->length, alloc);
-    Dict dStore;
-    Dict* d = &dStore;
-    if (StandardBencSerializer_get()->parseDictionary(r, alloc, d)) {
-        Log_info(context->logger, "Failed to parse message");
+    Dict* d = NULL;
+    char* err = BencMessageReader_readNoExcept(message, alloc, &d);
+    if (err) {
+        Log_info(context->logger, "Failed to parse message [%s]", err);
         return Error_INVALID;
     }
 

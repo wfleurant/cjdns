@@ -30,14 +30,13 @@
 #include "interface/Interface.h"
 #include "interface/UDPInterface_admin.h"
 #include "io/Reader.h"
-#include "io/ArrayReader.h"
-#include "io/ArrayWriter.h"
 #include "io/FileReader.h"
 #include "io/Writer.h"
 #include "io/FileWriter.h"
 #include "benc/serialization/BencSerializer.h"
 #include "benc/serialization/json/JsonBencSerializer.h"
-#include "benc/serialization/standard/StandardBencSerializer.h"
+#include "benc/serialization/standard/BencMessageReader.h"
+#include "benc/serialization/standard/BencMessageWriter.h"
 #include "util/log/Log.h"
 #include "memory/MallocAllocator.h"
 #include "memory/Allocator.h"
@@ -607,37 +606,20 @@ int main(int argc, char** argv)
         Dict_putDict(preConf, String_CONST("logging"), logging, allocator);
     }
 
-    #define CONFIG_BUFF_SIZE 1024
-    uint8_t buff[CONFIG_BUFF_SIZE] = {0};
-    struct Writer* toAngelWriter = ArrayWriter_new(buff, CONFIG_BUFF_SIZE - 1, allocator);
-    if (StandardBencSerializer_get()->serializeDictionary(toAngelWriter, preConf)) {
-        Except_throw(eh, "Failed to serialize pre-configuration");
-    }
-    struct Message* toAngelMsg = &(struct Message) {
-        .bytes = buff,
-        .length = toAngelWriter->bytesWritten
-    };
-    toAngelMsg = Message_clone(toAngelMsg, allocator);
+    struct Message* toAngelMsg = Message_new(0, 1024, allocator);
+    BencMessageWriter_write(preConf, toAngelMsg, eh);
     Interface_sendMessage(&angelPipe->iface, toAngelMsg);
 
-    Log_keys(logger, "Sent [%s] to angel process.", buff);
+    Log_debug(logger, "Sent [%d] bytes to angel process", toAngelMsg->length);
 
     // --------------------- Get Response from Angel --------------------- //
 
     struct Message* fromAngelMsg =
         InterfaceWaiter_waitForData(&angelPipe->iface, eventBase, allocator, eh);
-    Dict responseFromAngel;
-    struct Reader* responseFromAngelReader =
-        ArrayReader_new(fromAngelMsg->bytes, fromAngelMsg->length, allocator);
-    if (StandardBencSerializer_get()->parseDictionary(responseFromAngelReader,
-                                                      allocator,
-                                                      &responseFromAngel))
-    {
-        Except_throw(eh, "Failed to parse pre-configuration response [%s]", buff);
-    }
+    Dict* responseFromAngel = BencMessageReader_read(fromAngelMsg, allocator, eh);
 
     // --------------------- Get Admin Addr/Port/Passwd --------------------- //
-    Dict* responseFromAngelAdmin = Dict_getDict(&responseFromAngel, String_CONST("admin"));
+    Dict* responseFromAngelAdmin = Dict_getDict(responseFromAngel, String_CONST("admin"));
     adminBind = Dict_getString(responseFromAngelAdmin, String_CONST("bind"));
 
     if (!adminBind) {

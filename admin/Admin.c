@@ -16,13 +16,9 @@
 #include "benc/String.h"
 #include "benc/Int.h"
 #include "benc/Dict.h"
-#include "benc/serialization/BencSerializer.h"
-#include "benc/serialization/standard/StandardBencSerializer.h"
+#include "benc/serialization/standard/BencMessageWriter.h"
+#include "benc/serialization/standard/BencMessageReader.h"
 #include "interface/addressable/AddrInterface.h"
-#include "io/Reader.h"
-#include "io/ArrayReader.h"
-#include "io/ArrayWriter.h"
-#include "io/Writer.h"
 #include "memory/Allocator.h"
 #include "util/Assert.h"
 #include "util/Bits.h"
@@ -132,22 +128,10 @@ static int sendBenc(Dict* message,
                     struct Allocator* alloc,
                     struct Admin* admin)
 {
-    #define SEND_MESSAGE_PADDING 32
-    uint8_t buff[Admin_MAX_RESPONSE_SIZE + SEND_MESSAGE_PADDING];
-
-    struct Writer* w = ArrayWriter_new(buff + SEND_MESSAGE_PADDING,
-                                       Admin_MAX_RESPONSE_SIZE,
-                                       alloc);
-    StandardBencSerializer_get()->serializeDictionary(w, message);
-
-    struct Message m = {
-        .bytes = buff + SEND_MESSAGE_PADDING,
-        .length = w->bytesWritten,
-        .padding = SEND_MESSAGE_PADDING
-    };
-    struct Message* msg = Message_clone(&m, alloc);
-    int out = sendMessage(msg, dest, admin);
-    return out;
+    #define sendBenc_PADDING 32
+    struct Message* msg = Message_new(0, Admin_MAX_RESPONSE_SIZE + sendBenc_PADDING, alloc);
+    BencMessageWriter_write(message, msg, NULL);
+    return sendMessage(msg, dest, admin);
 }
 
 /**
@@ -441,24 +425,27 @@ static void handleMessage(struct Message* message,
         return;
     }
 
-    struct Reader* reader = ArrayReader_new(message->bytes, message->length, alloc);
-    Dict messageDict;
-    if (StandardBencSerializer_get()->parseDictionary(reader, alloc, &messageDict)) {
+    int origMessageLen = message->length;
+    Dict* messageDict = NULL;
+    char* err = BencMessageReader_readNoExcept(message, alloc, &messageDict);
+    if (err) {
         Log_warn(admin->logger,
-                 "Unparsable data from [%s] content: [%s]",
-                 Sockaddr_print(src, alloc), message->bytes);
+                 "Unparsable data from [%s] content: [%s] error: [%s]",
+                 Sockaddr_print(src, alloc), message->bytes, err);
         return;
     }
 
-    int amount = reader->bytesRead;
-    if (amount < message->length) {
+    if (message->length) {
         Log_warn(admin->logger,
                  "Message from [%s] contained garbage after byte [%d] content: [%s]",
-                 Sockaddr_print(src, alloc), amount - 1, message->bytes);
+                 Sockaddr_print(src, alloc), message->length, message->bytes);
         return;
     }
 
-    handleRequest(&messageDict, message, src, alloc, admin);
+    // put the data back in the front of the message because it is used by the auth checker.
+    Message_shift(message, origMessageLen, NULL);
+
+    handleRequest(messageDict, message, src, alloc, admin);
 }
 
 static uint8_t receiveMessage(struct Message* message, struct Interface* iface)

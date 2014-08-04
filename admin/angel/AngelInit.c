@@ -16,14 +16,11 @@
 #include "admin/angel/InterfaceWaiter.h"
 #include "benc/Dict.h"
 #include "benc/String.h"
-#include "benc/serialization/standard/StandardBencSerializer.h"
-#include "benc/serialization/BencSerializer.h"
+#include "benc/serialization/standard/BencMessageReader.h"
+#include "benc/serialization/standard/BencMessageWriter.h"
 #include "crypto/random/Random.h"
 #include "interface/Interface.h"
 #include "interface/FramingInterface.h"
-#include "io/ArrayReader.h"
-#include "io/ArrayWriter.h"
-#include "io/FileReader.h"
 #include "io/FileWriter.h"
 #include "memory/Allocator.h"
 #include "memory/MallocAllocator.h"
@@ -68,22 +65,10 @@ static void sendConfToCore(struct Interface* toCoreInterface,
                            struct Except* eh,
                            struct Log* logger)
 {
-    #define CONFIG_BUFF_SIZE 1024
-    uint8_t buff[CONFIG_BUFF_SIZE + 32] = {0};
-    uint8_t* start = buff + 32;
-
-    struct Writer* writer = ArrayWriter_new(start, CONFIG_BUFF_SIZE - 33, tempAlloc);
-    if (StandardBencSerializer_get()->serializeDictionary(writer, config)) {
-        Except_throw(eh, "Failed to serialize pre-configuration for core.");
-    }
-    struct Message* m = &(struct Message) {
-        .bytes = start,
-        .length = writer->bytesWritten,
-        .padding = 32
-    };
-    m = Message_clone(m, tempAlloc);
-    Log_keys(logger, "Sent [%d] bytes to core [%s].", m->length, m->bytes);
-    toCoreInterface->sendMessage(m, toCoreInterface);
+    struct Message* msg = Message_new(0, 1024, tempAlloc);
+    BencMessageWriter_write(config, msg, eh);
+    Log_keys(logger, "Sent [%d] bytes to core", msg->length);
+    toCoreInterface->sendMessage(msg, toCoreInterface);
 }
 
 static void setUser(char* user, struct Log* logger, struct Except* eh)
@@ -183,13 +168,9 @@ int AngelInit_main(int argc, char** argv)
 
     Log_debug(logger, "Finished getting pre-configuration from client");
 
-    struct Reader* reader = ArrayReader_new(preConf->bytes, preConf->length, tempAlloc);
-    Dict config;
-    if (StandardBencSerializer_get()->parseDictionary(reader, tempAlloc, &config)) {
-        Except_throw(eh, "Failed to parse configuration.");
-    }
+    Dict* config = BencMessageReader_read(preConf, tempAlloc, eh);
 
-    Dict* admin = Dict_getDict(&config, String_CONST("admin"));
+    Dict* admin = Dict_getDict(config, String_CONST("admin"));
     String* core = Dict_getString(admin, String_CONST("core"));
     String* bind = Dict_getString(admin, String_CONST("bind"));
     String* pass = Dict_getString(admin, String_CONST("pass"));
@@ -219,7 +200,7 @@ int AngelInit_main(int argc, char** argv)
     Log_debug(logger, "Sending pre-configuration to core.");
 
 
-    sendConfToCore(coreIface, tempAlloc, &config, eh, logger);
+    sendConfToCore(coreIface, tempAlloc, config, eh, logger);
 
     struct Message* coreResponse = InterfaceWaiter_waitForData(coreIface, eventBase, tempAlloc, eh);
 

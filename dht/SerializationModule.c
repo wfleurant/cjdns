@@ -17,12 +17,8 @@
 #include "dht/DHTModule.h"
 #include "dht/DHTModuleRegistry.h"
 #include "memory/Allocator.h"
-#include "io/Reader.h"
-#include "io/ArrayReader.h"
-#include "io/Writer.h"
-#include "io/ArrayWriter.h"
-#include "benc/serialization/BencSerializer.h"
-#include "benc/serialization/standard/StandardBencSerializer.h"
+#include "benc/serialization/standard/BencMessageReader.h"
+#include "benc/serialization/standard/BencMessageWriter.h"
 #include "util/Bits.h"
 #include "util/log/Log.h"
 #include "wire/Message.h"
@@ -72,14 +68,13 @@ void SerializationModule_register(struct DHTModuleRegistry* registry,
 static int handleOutgoing(struct DHTMessage* message,
                           void* vcontext)
 {
-    uint8_t buff[DHTMessage_MAX_SIZE];
-    struct Writer* writer = ArrayWriter_new(buff, DHTMessage_MAX_SIZE, message->allocator);
-    SERIALIZER->serializeDictionary(writer, message->asDict);
-    while ((writer->bytesWritten + message->binMessage->length) % 8) {
-        Message_push8(message->binMessage, 0, NULL);
-    }
-    message->binMessage->length = 0;
-    Message_push(message->binMessage, buff, writer->bytesWritten, NULL);
+   // This is always at the end of the message.
+    Assert_true(!message->binMessage->length);
+    Assert_true(!((uintptr_t)message->binMessage->bytes % 4) || !"alignment fault0");
+
+    BencMessageWriter_write(message->asDict, message->binMessage, NULL);
+
+    Assert_true(!((uintptr_t)message->binMessage->bytes % 4) || !"alignment fault");
 
     return 0;
 }
@@ -92,28 +87,16 @@ static int handleOutgoing(struct DHTMessage* message,
 static int handleIncoming(struct DHTMessage* message,
                           void* vcontext)
 {
-    message->asDict = Dict_new(message->allocator);
-
-    struct Reader* reader = ArrayReader_new(message->binMessage->bytes,
-                                            message->binMessage->length,
-                                            message->allocator);
-
-    int ret = SERIALIZER->parseDictionary(reader, message->allocator, message->asDict);
-    if (ret != 0) {
-        #ifdef Log_INFO
-            struct SerializationModule_context* context = vcontext;
-            Log_info(context->logger, "Failed to parse message [%d]", ret);
-        #endif
+    struct SerializationModule_context* context = vcontext;
+    char* err =
+        BencMessageReader_readNoExcept(message->binMessage, message->allocator, &message->asDict);
+    if (err) {
+        Log_info(context->logger, "Failed to parse message [%s]", err);
         return -2;
     }
-    if (message->binMessage->length != (int)reader->bytesRead) {
-        #ifdef Log_INFO
-            struct SerializationModule_context* context = vcontext;
-            Log_info(context->logger, "Message contains [%d] bytes of crap at the end",
-                     (int)(message->binMessage->length - (int)reader->bytesRead));
-        #endif
+    if (message->binMessage->length) {
+        Log_info(context->logger, "Message contains [%d] bytes of crap at the end",
+                 (int)message->binMessage->length);
     }
-    Message_reset(message->binMessage);
-
     return 0;
 }
