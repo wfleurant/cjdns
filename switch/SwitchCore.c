@@ -23,6 +23,7 @@
 #include "wire/Control.h"
 #include "wire/Error.h"
 #include "wire/Headers.h"
+#include "wire/SwitchHeader.h"
 #include "wire/Message.h"
 
 #include <inttypes.h>
@@ -35,28 +36,6 @@ struct SwitchInterface
     struct SwitchCore* core;
 
     struct Allocator_OnFreeJob* onFree;
-
-    /**
-     * How much traffic has flowed down an interface as the sum of all packet priority.
-     * If this number reaches bufferMax, further incoming traffic is dropped to prevent flooding.
-     * Users should periodically adjust the buffer toward zero to fairly meter out priority in
-     * congestion situations.
-     */
-    int64_t buffer;
-
-    /**
-     * How high the buffer is allowed to get before beginning to drop packets.
-     * For nodes in the core, this number should be large because a buffer
-     * limit of a core link will cause route flapping.
-     * For edge nodes it is a measure of how much the ISP trusts the end user not to flood.
-     */
-    int64_t bufferMax;
-
-    /**
-     * How congested an interface is.
-     * this number is subtraced from packet priority when the packet is sent down this interface.
-     */
-    uint32_t congestion;
 };
 
 struct SwitchCore
@@ -82,33 +61,24 @@ static inline uint16_t sendMessage(const struct SwitchInterface* switchIf,
                                    struct Message* toSend,
                                    struct Log* logger)
 {
-    struct Headers_SwitchHeader* switchHeader = (struct Headers_SwitchHeader*) toSend->bytes;
-
-    uint32_t priority = Headers_getPriority(switchHeader);
-    if (switchIf->buffer + priority > switchIf->bufferMax) {
-        uint32_t messageType = Headers_getMessageType(switchHeader);
-        Headers_setPriorityAndMessageType(switchHeader, 0, messageType);
-    }
-
     return Interface_sendMessage(switchIf->iface, toSend);
 }
 
-struct ErrorPacket {
-    struct Headers_SwitchHeader switchHeader;
+#ifdef Version_7_COMPAT
+struct ErrorPacket7 {
+    struct SwitchHeader switchHeader;
     struct Control ctrl;
 };
-Assert_compileTime(
-    sizeof(struct ErrorPacket) == Headers_SwitchHeader_SIZE + sizeof(struct Control));
-
-static inline void sendError(struct SwitchInterface* iface,
-                             struct Message* cause,
-                             uint32_t code,
-                             struct Log* logger)
+Assert_compileTime(sizeof(struct ErrorPacket7) == SwitchHeader_SIZE + sizeof(struct Control));
+static inline void sendError7(struct SwitchInterface* iface,
+                              struct Message* cause,
+                              uint32_t code,
+                              struct Log* logger)
 {
-    struct Headers_SwitchHeader* header = (struct Headers_SwitchHeader*) cause->bytes;
+    struct SwitchHeader* header = (struct SwitchHeader*) cause->bytes;
 
-    if (Headers_getMessageType(header) == Headers_SwitchHeader_TYPE_CONTROL
-        && ((struct ErrorPacket*) cause->bytes)->ctrl.type_be == Control_ERROR_be)
+    if (SwitchHeader_getMessageType(header) == SwitchHeader_TYPE_CONTROL
+        && ((struct ErrorPacket7*) cause->bytes)->ctrl.type_be == Control_ERROR_be)
     {
         // Errors never cause other errors to be sent.
         return;
@@ -120,22 +90,100 @@ static inline void sendError(struct SwitchInterface* iface,
 
     // Shift back so we can add another header.
     Message_shift(cause,
-                  Headers_SwitchHeader_SIZE + Control_HEADER_SIZE + Control_Error_HEADER_SIZE,
+                  SwitchHeader_SIZE + Control_HEADER_SIZE + Control_Error_HEADER_SIZE,
                   NULL);
-    struct ErrorPacket* err = (struct ErrorPacket*) cause->bytes;
+    struct ErrorPacket7* err = (struct ErrorPacket7*) cause->bytes;
 
     err->switchHeader.label_be = Bits_bitReverse64(header->label_be);
-    Headers_setPriorityAndMessageType(&err->switchHeader,
-                                      Headers_getPriority(header),
-                                      Headers_SwitchHeader_TYPE_CONTROL);
+    SwitchHeader_setPriorityAndMessageType(&err->switchHeader,
+                                           SwitchHeader_getPriority(header),
+                                           SwitchHeader_TYPE_CONTROL);
     err->ctrl.type_be = Control_ERROR_be;
     err->ctrl.content.error.errorType_be = Endian_hostToBigEndian32(code);
     err->ctrl.checksum_be = 0;
 
     err->ctrl.checksum_be =
-        Checksum_engine((uint8_t*) &err->ctrl, cause->length - Headers_SwitchHeader_SIZE);
+        Checksum_engine((uint8_t*) &err->ctrl, cause->length - SwitchHeader_SIZE);
 
     sendMessage(iface, cause, logger);
+}
+#endif
+
+struct ErrorPacket8 {
+    struct SwitchHeader switchHeader;
+    uint32_t handle;
+    struct Control ctrl;
+};
+Assert_compileTime(sizeof(struct ErrorPacket8) == SwitchHeader_SIZE + 4 + sizeof(struct Control));
+static inline void sendError8(struct SwitchInterface* iface,
+                              struct Message* cause,
+                              uint32_t code,
+                              struct Log* logger)
+{
+    if (cause->length < SwitchHeader_SIZE + 4) {
+        Log_debug(logger, "runt");
+        return;
+    }
+
+    struct SwitchHeader* header = (struct SwitchHeader*) cause->bytes;
+
+    if (SwitchHeader_getSuppressErrors(header)) {
+        // don't send errors if they're asking us to suppress them!
+        return;
+    }
+
+    // limit of 256 bytes
+    cause->length =
+        (cause->length < Control_Error_MAX_SIZE) ? cause->length : Control_Error_MAX_SIZE;
+
+    // Shift back so we can add another header.
+    Message_shift(cause,
+                  SwitchHeader_SIZE + 4 + Control_HEADER_SIZE + Control_Error_HEADER_SIZE,
+                  NULL);
+    struct ErrorPacket8* err = (struct ErrorPacket8*) cause->bytes;
+
+    err->switchHeader.label_be = Bits_bitReverse64(header->label_be);
+    SwitchHeader_setSuppressErrors(header, true);
+    SwitchHeader_setPriority(header, 0);
+    SwitchHeader_setCongestion(header, 0);
+
+    err->handle = 0xffffffff;
+    err->ctrl.type_be = Control_ERROR_be;
+    err->ctrl.content.error.errorType_be = Endian_hostToBigEndian32(code);
+    err->ctrl.checksum_be = 0;
+
+    err->ctrl.checksum_be =
+        Checksum_engine((uint8_t*) &err->ctrl, cause->length - SwitchHeader_SIZE);
+
+    sendMessage(iface, cause, logger);
+}
+
+static inline void sendError(struct SwitchInterface* iface,
+                             struct Message* cause,
+                             uint32_t code,
+                             struct Log* logger)
+{
+    struct SwitchHeader* header = (struct SwitchHeader*) cause->bytes;
+
+    #ifdef Version_8_COMPAT
+        if (SwitchHeader_getCongestion(header)) {
+            // new version packet.
+            sendError8(iface, cause, code, logger);
+            return;
+        } else if (cause->length > SwitchHeader_SIZE + 4 &&
+            ((uint32_t*)(&header[1]))[0] == 0xffffffff)
+        {
+            // ctrl packet which is being sent to a possibly-old-version node.
+            sendError8(iface, cause, code, logger);
+            return;
+        }
+        #ifdef Version_7_COMPAT
+            sendError7(iface, cause, code, logger);
+            return;
+        #endif
+    #endif
+
+    sendError8(iface, cause, code, logger);
 }
 
 #define DEBUG_SRC_DST(logger, message) \
@@ -145,18 +193,14 @@ static inline void sendError(struct SwitchInterface* iface,
 static uint8_t receiveMessage(struct Message* message, struct Interface* iface)
 {
     struct SwitchInterface* sourceIf = (struct SwitchInterface*) iface->receiverContext;
-    if (sourceIf->buffer > sourceIf->bufferMax) {
-        Log_warn(sourceIf->core->logger, "DROP because node seems to be flooding.");
-        return Error_NONE;
-    }
 
-    if (message->length < Headers_SwitchHeader_SIZE) {
+    if (message->length < SwitchHeader_SIZE) {
         Log_debug(sourceIf->core->logger, "DROP runt packet.");
         return Error_NONE;
     }
 
     struct SwitchCore* core = sourceIf->core;
-    struct Headers_SwitchHeader* header = (struct Headers_SwitchHeader*) message->bytes;
+    struct SwitchHeader* header = (struct SwitchHeader*) message->bytes;
     const uint64_t label = Endian_bigEndianToHost64(header->label_be);
     uint32_t bits = NumberCompress_bitsUsedForLabel(label);
     const uint32_t sourceIndex = sourceIf - core->interfaces;
@@ -267,7 +311,7 @@ static uint8_t receiveMessage(struct Message* message, struct Interface* iface)
         Message_shift(message, Control_Error_MAX_SIZE, NULL);
         Bits_memcpy(message->bytes, messageClone, cloneLength);
         message->length = cloneLength;
-        header = (struct Headers_SwitchHeader*) message->bytes;
+        header = (struct SwitchHeader*) message->bytes;
         header->label_be = Endian_bigEndianToHost64(label);
         sendError(sourceIf, message, err, sourceIf->core->logger);
         return Error_NONE;
@@ -340,10 +384,7 @@ int SwitchCore_addInterface(struct Interface* iface,
 
     Bits_memcpyConst(newIf, (&(struct SwitchInterface) {
         .iface = iface,
-        .core = core,
-        .buffer = 0,
-        .bufferMax = trust,
-        .congestion = 0
+        .core = core
     }), sizeof(struct SwitchInterface));
 
     newIf->onFree = Allocator_onFree(iface->allocator, removeInterface, newIf);
@@ -363,10 +404,7 @@ int SwitchCore_setRouterInterface(struct Interface* iface, struct SwitchCore* co
 {
     Bits_memcpyConst(&core->interfaces[1], (&(struct SwitchInterface) {
         .iface = iface,
-        .core = core,
-        .buffer = 0,
-        .bufferMax = INT64_MAX,
-        .congestion = 0
+        .core = core
     }), sizeof(struct SwitchInterface));
 
     iface->receiverContext = &core->interfaces[1];

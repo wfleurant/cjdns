@@ -33,6 +33,8 @@ struct NodeStore
 
     struct Node_Two* selfNode;
 
+    int peerCount;
+
     int nodeCount;
     int nodeCapacity;
 
@@ -41,7 +43,7 @@ struct NodeStore
 };
 
 #define NodeStore_DEFAULT_NODE_CAPACITY 128
-#define NodeStore_DEFAULT_LINK_CAPACITY 1024
+#define NodeStore_DEFAULT_LINK_CAPACITY 2048
 
 /**
  * Create a new NodeStore.
@@ -191,9 +193,6 @@ void NodeStore_pathTimeout(struct NodeStore* nodeStore, uint64_t path);
  */
 void NodeStore_brokenPath(uint64_t path, struct NodeStore* store);
 
-/**
- * Dump the table, one node at a time.
- */
-struct Node_Two* NodeStore_dumpTable(struct NodeStore* store, uint32_t index);
+struct Node_Two* NodeStore_getNextNode(struct NodeStore* nodeStore, struct Node_Two* lastNode);
 
 #endif

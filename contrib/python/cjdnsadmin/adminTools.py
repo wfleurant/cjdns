@@ -11,6 +11,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from time import sleep
 
 def connect(ip='',port=0,password=''):
     from cjdnsadmin import connect, connectWithAdminInfo
@@ -56,6 +57,26 @@ def dumpTable(cjdns,verbose=False,unique_ip=False,nodes=[]):
 
     return rt
 
+def streamRoutingTable(cjdns, delay=10):
+    known = []
+
+    while True:
+        i = 0
+        while True:
+            table = cjdns.NodeStore_dumpTable(i)
+            routes = table['routingTable']
+            for entry in routes:
+                if entry['ip'] not in known:
+                    known.append(entry['ip'])
+                    yield entry
+
+            if 'more' not in table:
+                break
+
+            i += 1
+
+        sleep(delay)
+
 def peerStats(cjdns,up=False,verbose=False):
     from publicToIp6 import PublicToIp6_convert;
 
@@ -74,14 +95,20 @@ def peerStats(cjdns,up=False,verbose=False):
         i += 1
 
     if verbose:
+        STAT_FORMAT = '%s\t%s\tin %d\tout %d\t%s\tdup %d los %d oor %d'
+
         for peer in allPeers:
-            p = (PublicToIp6_convert(peer['publicKey']) + '\t' + peer['switchLabel'] + '\tin ' +
-                 str(peer['bytesIn']) + '\tout ' + str(peer['bytesOut']) + '\t' + peer['state'] +
-                 '\tdup ' + str(peer['duplicates']) +
-                 ' los ' + str(peer['lostPackets']) +
-                 ' oor ' + str(peer['receivedOutOfRange']));
-            if 'user' in peer: p += '"' + peer['user'] + '"';
-            print p;
+            ip = PublicToIp6_convert(peer['publicKey'])
+
+            p = STAT_FORMAT % (ip, peer['switchLabel'], peer['bytesIn'],
+                               peer['bytesOut'], peer['state'],
+                               peer['duplicates'], peer['lostPackets'],
+                               peer['receivedOutOfRange'])
+
+            if 'user' in peer:
+                p += '\t%r' % peer['user']
+
+            print p
     return allPeers
 
 def parseLabel(route):

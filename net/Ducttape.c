@@ -41,6 +41,7 @@
 #include "wire/Control.h"
 #include "wire/Error.h"
 #include "wire/Headers.h"
+#include "wire/CryptoHeader.h"
 #include "wire/Ethernet.h"
 
 #include <stdint.h>
@@ -85,26 +86,16 @@ static inline uint8_t sendToRouter(struct Message* message,
                                    struct SessionManager_Session* session,
                                    struct Ducttape_pvt* context)
 {
-    int safeDistance = Headers_SwitchHeader_SIZE;
+    int safeDistance = SwitchHeader_SIZE;
 
     CryptoAuth_resetIfTimeout(session->internal);
     if (CryptoAuth_getState(session->internal) < CryptoAuth_HANDSHAKE3) {
-        // Bug 104, see Version.h
-        #ifdef Version_2_COMPAT
-        if (session->version >= 3) {
-        #endif
-            // Put the handle into the message so that it's authenticated.
-            // see: sendToSwitch()
-            //Log_debug(context->logger, "Sending receive handle under CryptoAuth");
-            Message_push(message, &session->receiveHandle_be, 4, NULL);
-        #ifdef Version_2_COMPAT
-        } else {
-            // Otherwise it will be added on the other side.
-            safeDistance += 4;
-        }
-        #endif
+        // Put the handle into the message so that it's authenticated.
+        // see: sendToSwitch()
+        //Log_debug(context->logger, "Sending receive handle under CryptoAuth");
+        Message_push(message, &session->receiveHandle_be, 4, NULL);
 
-        safeDistance += Headers_CryptoAuth_SIZE;
+        safeDistance += CryptoHeader_SIZE;
     } else {
         // 16 for the authenticator, 4 for the nonce and 4 for the handle
         safeDistance += 24;
@@ -113,12 +104,13 @@ static inline uint8_t sendToRouter(struct Message* message,
     Message_shift(message, safeDistance, NULL);
     if (dtHeader->switchHeader) {
         if (message->bytes != (uint8_t*)dtHeader->switchHeader) {
-            Bits_memmoveConst(message->bytes, dtHeader->switchHeader, Headers_SwitchHeader_SIZE);
-            dtHeader->switchHeader = (struct Headers_SwitchHeader*) message->bytes;
+            Bits_memmoveConst(message->bytes, dtHeader->switchHeader, SwitchHeader_SIZE);
+            dtHeader->switchHeader = (struct SwitchHeader*) message->bytes;
         }
     } else {
-        dtHeader->switchHeader = (struct Headers_SwitchHeader*) message->bytes;
-        Bits_memset(dtHeader->switchHeader, 0, Headers_SwitchHeader_SIZE);
+        dtHeader->switchHeader = (struct SwitchHeader*) message->bytes;
+        Bits_memset(dtHeader->switchHeader, 0, SwitchHeader_SIZE);
+        SwitchHeader_setCongestion(dtHeader->switchHeader, 1);
     }
     Message_shift(message, -safeDistance, NULL);
 
@@ -319,10 +311,10 @@ static inline uint8_t incomingForMe(struct Message* message,
         return Error_UNDELIVERABLE;
     }
 
-    // prevent router advertizement schenanigans
-    if (dtHeader->ip6Header->hopLimit == 255) {
-        dtHeader->ip6Header->hopLimit--;
-    }
+    // Force set the hopLimit to a specific number, in preparation for the new protocol
+    // which will nolonger include hopLimit so it will need to be set at the end.
+    // This is here to test how applications behave with a weird hop limit.
+    dtHeader->ip6Header->hopLimit = 42;
 
     // Now write a message to the TUN device.
     // Need to move the ipv6 header forward up to the content because there's a crypto header
@@ -348,10 +340,10 @@ uint8_t Ducttape_injectIncomingForMe(struct Message* message,
 {
     struct Ducttape_pvt* context = Identity_check((struct Ducttape_pvt*)dt);
     struct Ducttape_MessageHeader* dtHeader = getDtHeader(message, true);
-    struct Headers_SwitchHeader sh;
-    Bits_memcpyConst(&sh, message->bytes, Headers_SwitchHeader_SIZE);
+    struct SwitchHeader sh;
+    Bits_memcpyConst(&sh, message->bytes, SwitchHeader_SIZE);
     dtHeader->switchHeader = &sh;
-    Message_shift(message, -Headers_SwitchHeader_SIZE, NULL);
+    Message_shift(message, -SwitchHeader_SIZE, NULL);
 
     struct Headers_IP6Header ip6;
     Bits_memcpyConst(&ip6, message->bytes, Headers_IP6Header_SIZE);
@@ -380,22 +372,12 @@ static inline uint8_t sendToSwitch(struct Message* message,
     if (CryptoAuth_getState(session->internal) >= CryptoAuth_HANDSHAKE3) {
         //debugHandlesAndLabel0(context->logger, session, label, "layer2 sending run message");
         uint32_t sendHandle_be = session->sendHandle_be;
-        #ifdef Version_2_COMPAT
-        if (session->version < 3) {
-            sendHandle_be |= HANDLE_FLAG_BIT_be;
-        }
-        #endif
         Message_push(message, &sendHandle_be, 4, NULL);
     } else {
         debugHandlesAndLabel0(context->logger, session, label, "layer2 sending start message");
-        #ifdef Version_2_COMPAT
-        if (session->version < 3) {
-            Message_push(message, &session->receiveHandle_be, 4, NULL);
-        }
-        #endif
     }
 
-    Message_shift(message, Headers_SwitchHeader_SIZE, NULL);
+    Message_shift(message, SwitchHeader_SIZE, NULL);
 
     Assert_true(message->bytes == (uint8_t*)dtHeader->switchHeader);
 
@@ -556,9 +538,9 @@ static inline uint8_t incomingFromTun(struct Message* message,
     CryptoAuth_resetIfTimeout(session->internal);
     if (CryptoAuth_getState(session->internal) < CryptoAuth_HANDSHAKE3) {
         // shift, copy, shift because shifting asserts that there is enough buffer space.
-        Message_shift(message, Headers_CryptoAuth_SIZE + 4, NULL);
+        Message_shift(message, CryptoHeader_SIZE + 4, NULL);
         Bits_memcpyConst(message->bytes, header, Headers_IP6Header_SIZE);
-        Message_shift(message, -(Headers_IP6Header_SIZE + Headers_CryptoAuth_SIZE + 4), NULL);
+        Message_shift(message, -(Headers_IP6Header_SIZE + CryptoHeader_SIZE + 4), NULL);
         // now push the receive handle *under* the CA header.
         Message_push(message, &session->receiveHandle_be, 4, NULL);
         debugHandles0(context->logger, session, "layer3 sending start message");
@@ -567,7 +549,8 @@ static inline uint8_t incomingFromTun(struct Message* message,
         Message_shift(message, 20, NULL);
         Bits_memmoveConst(message->bytes, header, Headers_IP6Header_SIZE);
         Message_shift(message, -(20 + Headers_IP6Header_SIZE), NULL);
-        debugHandles0(context->logger, session, "layer3 sending run message");
+        // Per packet spam
+        //debugHandles0(context->logger, session, "layer3 sending run message");
     }
 
     // This comes out at outgoingFromCryptoAuth() then outgoingFromMe()
@@ -672,11 +655,12 @@ static inline int core(struct Message* message,
             struct SessionManager_Session* session =
                 SessionManager_getSession(ip6Header->sourceAddr, NULL, context->sm);
 
+            /* Per packet logging...
             #ifdef Log_DEBUG
                 uint8_t addr[40];
                 AddrTools_printIp(addr, ip6Header->sourceAddr);
                 Log_debug(context->logger, "Incoming layer3 message, ostensibly from [%s]", addr);
-            #endif
+            #endif */
 
             dtHeader->receiveHandle = Endian_bigEndianToHost32(session->receiveHandle_be);
             dtHeader->layer = Ducttape_SessionLayer_INNER;
@@ -719,11 +703,14 @@ static inline int core(struct Message* message,
             Address_print(nhAddr, &addr);
             if (Bits_memcmp(ip6Header->destinationAddr, addr.ip6.bytes, 16)) {
                 // Potentially forwarding for ourselves.
-                struct Address destination;
-                Bits_memcpyConst(destination.ip6.bytes, ip6Header->destinationAddr, 16);
-                uint8_t ipAddr[40];
-                Address_printIp(ipAddr, &destination);
-                Log_debug(context->logger, "Forwarding data to %s via %s\n", ipAddr, nhAddr);
+                /* per packet logging
+                #ifdef Log_DEBUG
+                    struct Address destination;
+                    Bits_memcpyConst(destination.ip6.bytes, ip6Header->destinationAddr, 16);
+                    uint8_t ipAddr[40];
+                    Address_printIp(ipAddr, &destination);
+                    Log_debug(context->logger, "Forwarding data to %s via %s\n", ipAddr, nhAddr);
+                #endif */
             } else {
                 // Definitely forwarding on behalf of someone else.
                 //Log_debug(context->logger, "Forwarding data to %s (last hop)\n", nhAddr);
@@ -837,16 +824,7 @@ static uint8_t incomingFromCryptoAuth(struct Message* message, struct Interface*
             return Error_INVALID;
         }
         if (layer == Ducttape_SessionLayer_OUTER) {
-            #ifdef Version_2_COMPAT
-            if (dtHeader->currentSessionVersion >= 3) {
-                session->version = dtHeader->currentSessionVersion;
-            #endif
-                Message_pop(message, &session->sendHandle_be, 4, NULL);
-            #ifdef Version_2_COMPAT
-            } else {
-                session->sendHandle_be = dtHeader->currentSessionSendHandle_be;
-            }
-            #endif
+            Message_pop(message, &session->sendHandle_be, 4, NULL);
         } else {
             // inner layer, always grab the handle
             Message_pop(message, &session->sendHandle_be, 4, NULL);
@@ -886,11 +864,28 @@ static uint8_t outgoingFromCryptoAuth(struct Message* message, struct Interface*
     if (layer == Ducttape_SessionLayer_OUTER) {
         return sendToSwitch(message, dtHeader, session, context);
     } else if (layer == Ducttape_SessionLayer_INNER) {
-        Log_debug(context->logger, "Sending layer3 message");
+        //Log_debug(context->logger, "Sending layer3 message");
         return outgoingFromMe(message, dtHeader, session, context);
     } else {
         Assert_true(0);
     }
+}
+
+/**
+ * Take a CTRL message in v7 form  [ switch header ][ ctrl header ]
+ * and change to v8 form   [ switch header ][ 0xffffffff ][ ctrl header ]
+ * message pointer is at beginning of ctrl header.
+ */
+static void changeToVersion8(struct Message* msg)
+{
+    struct SwitchHeader sh;
+    Message_shift(msg, SwitchHeader_SIZE, NULL);
+    Message_pop(msg, &sh, SwitchHeader_SIZE, NULL);
+    Message_push32(msg, 0xffffffff, NULL);
+    SwitchHeader_setCongestion(&sh, 0);
+    SwitchHeader_setSuppressErrors(&sh, false);
+    Message_push(msg, &sh, SwitchHeader_SIZE, NULL);
+    Message_shift(msg, -SwitchHeader_SIZE, NULL);
 }
 
 /**
@@ -901,11 +896,13 @@ static uint8_t outgoingFromCryptoAuth(struct Message* message, struct Interface*
  *                that is to say, after the end of the switch header.
  * @param switchHeader the header.
  * @param switchIf the interface which leads to the switch.
+ * @param isFormV8 true if the control message is in the form specified by protocol version 8+
  */
 static uint8_t handleControlMessage(struct Ducttape_pvt* context,
                                     struct Message* message,
-                                    struct Headers_SwitchHeader* switchHeader,
-                                    struct Interface* switchIf)
+                                    struct SwitchHeader* switchHeader,
+                                    struct Interface* switchIf,
+                                    bool isFormV8)
 {
     uint8_t labelStr[20];
     uint64_t label = Endian_bigEndianToHost64(switchHeader->label_be);
@@ -929,10 +926,29 @@ static uint8_t handleControlMessage(struct Ducttape_pvt* context,
         }
 
         uint64_t path = Endian_bigEndianToHost64(switchHeader->label_be);
-        RouterModule_brokenPath(path, context->routerModule);
+        if (!LabelSplicer_isOneHop(path)) {
+            RouterModule_brokenPath(path, context->routerModule);
+        }
 
-        uint8_t causeType = Headers_getMessageType(&ctrl->content.error.cause);
-        if (causeType == Headers_SwitchHeader_TYPE_CONTROL) {
+        // Determine whether the "cause" packet is a control message.
+        bool isCtrlCause = false;
+        #ifdef Version_7_COMPAT
+            if (SwitchHeader_TYPE_CONTROL ==
+                SwitchHeader_getMessageType(&ctrl->content.error.cause))
+            {
+                isCtrlCause = true;
+            } else if (SwitchHeader_TYPE_DATA <
+                SwitchHeader_getMessageType(&ctrl->content.error.cause))
+            {
+        #endif
+        if (ctrl->content.error.causeHandle == 0xffffffff) {
+            isCtrlCause = true;
+        }
+        #ifdef Version_7_COMPAT
+            }
+        #endif
+
+        if (isCtrlCause) {
             if (message->length < Control_Error_MIN_SIZE + Control_HEADER_SIZE) {
                 Log_info(context->logger,
                           "error packet from [%s] containing runt cause packet",
@@ -967,13 +983,9 @@ static uint8_t handleControlMessage(struct Ducttape_pvt* context,
                 // errors resulting from pings are forwarded back to the pinger.
                 pong = true;
             }
-        } else if (causeType != Headers_SwitchHeader_TYPE_DATA) {
-            Log_info(context->logger,
-                      "error packet from [%s] containing cause of unknown type [%u]",
-                      labelStr, causeType);
         } else {
             uint32_t errorType = Endian_bigEndianToHost32(ctrl->content.error.errorType_be);
-            if (errorType != Error_RETURN_PATH_INVALID) {
+            if (errorType != Error_RETURN_PATH_INVALID && false /* TODO(cjd): testing */) {
                 // Error_RETURN_PATH_INVALID is impossible to prevent so will appear all the time.
                 Log_info(context->logger,
                          "error packet from [%s] [%s]",
@@ -992,6 +1004,7 @@ static uint8_t handleControlMessage(struct Ducttape_pvt* context,
             return Error_INVALID;
         }
         struct Control_Ping* ping = (struct Control_Ping*) message->bytes;
+        uint32_t herVersion = Endian_bigEndianToHost32(ping->version_be);
         ping->magic = Control_Pong_MAGIC;
         ping->version_be = Endian_hostToBigEndian32(Version_CURRENT_PROTOCOL);
         Message_shift(message, Control_HEADER_SIZE, NULL);
@@ -999,9 +1012,17 @@ static uint8_t handleControlMessage(struct Ducttape_pvt* context,
         ctrl->type_be = Control_PONG_be;
         ctrl->checksum_be = 0;
         ctrl->checksum_be = Checksum_engine(message->bytes, message->length);
-        Message_shift(message, Headers_SwitchHeader_SIZE, NULL);
+
+        if (isFormV8) {
+            Message_shift(message, 4, NULL);
+        } else if (herVersion >= 8) {
+            changeToVersion8(message);
+        }
+        Message_shift(message, SwitchHeader_SIZE, NULL);
+
         Log_debug(context->logger, "got switch ping from [%s]", labelStr);
-        switchIf->receiveMessage(message, switchIf);
+
+        Interface_receiveMessage(switchIf, message);
 
     } else if (ctrl->type_be == Control_KEYPONG_be) {
         pong = true;
@@ -1032,6 +1053,7 @@ static uint8_t handleControlMessage(struct Ducttape_pvt* context,
         }
 
         keyPing->magic = Control_KeyPong_MAGIC;
+        uint32_t herVersion = Endian_bigEndianToHost32(keyPing->version_be);
         keyPing->version_be = Endian_hostToBigEndian32(Version_CURRENT_PROTOCOL);
         Bits_memcpyConst(keyPing->key, context->myAddr.key, 32);
         Message_shift(message, Control_HEADER_SIZE, NULL);
@@ -1039,7 +1061,13 @@ static uint8_t handleControlMessage(struct Ducttape_pvt* context,
         ctrl->type_be = Control_KEYPONG_be;
         ctrl->checksum_be = 0;
         ctrl->checksum_be = Checksum_engine(message->bytes, message->length);
-        Message_shift(message, Headers_SwitchHeader_SIZE, NULL);
+
+        if (isFormV8) {
+            Message_shift(message, 4, NULL);
+        } else if (herVersion >= 8) {
+            changeToVersion8(message);
+        }
+        Message_shift(message, SwitchHeader_SIZE, NULL);
 
         Interface_receiveMessage(switchIf, message);
 
@@ -1050,39 +1078,15 @@ static uint8_t handleControlMessage(struct Ducttape_pvt* context,
     }
 
     if (pong && context->pub.switchPingerIf.receiveMessage) {
+        if (isFormV8) {
+            Message_shift(message, 4, NULL);
+        }
         // Shift back over the header
-        Message_shift(message, Headers_SwitchHeader_SIZE, NULL);
-        context->pub.switchPingerIf.receiveMessage(
-            message, &context->pub.switchPingerIf);
+        Message_shift(message, SwitchHeader_SIZE, NULL);
+        Interface_receiveMessage(&context->pub.switchPingerIf, message);
     }
     return Error_NONE;
 }
-
-#ifdef Version_2_COMPAT
-static inline void translateVersion2(struct Message* message,
-                                     struct Ducttape_MessageHeader* dtHeader)
-{
-    uint32_t handle = Endian_bigEndianToHost32(((uint32_t*)message->bytes)[0]);
-    uint32_t nonce = Endian_bigEndianToHost32(((uint32_t*)message->bytes)[1]);
-    dtHeader->currentSessionVersion = 2;
-    if (handle & HANDLE_FLAG_BIT) {
-        // We have to doctor their handles to make them conform to the new protocol.
-        // see sendToSwitch() where they are un-doctored when being sent back.
-        handle &= ~HANDLE_FLAG_BIT;
-        ((uint32_t*)message->bytes)[0] = Endian_bigEndianToHost32(handle);
-        return;
-    }
-    // This has a 4 / 4294967296 risk of a false positive, losing a traffic packet
-    // between 2 version2 nodes because the first 4 bytes of the content are mistaken
-    // for a nonce.
-    if (nonce <= 3) {
-        dtHeader->currentSessionSendHandle_be = Endian_bigEndianToHost32(handle);
-        Message_shift(message, -4, NULL);
-        return;
-    }
-    dtHeader->currentSessionVersion = 3;
-}
-#endif
 
 /**
  * This is called as sendMessage() by the switch.
@@ -1095,16 +1099,18 @@ static uint8_t incomingFromSwitch(struct Message* message, struct Interface* swi
 
     struct Ducttape_MessageHeader* dtHeader = getDtHeader(message, true);
 
-    struct Headers_SwitchHeader* switchHeader = (struct Headers_SwitchHeader*) message->bytes;
-    Message_shift(message, -Headers_SwitchHeader_SIZE, NULL);
+    struct SwitchHeader* switchHeader = (struct SwitchHeader*) message->bytes;
+    Message_shift(message, -SwitchHeader_SIZE, NULL);
 
     // The label comes in reversed from the switch because the switch doesn't know that we aren't
     // another switch ready to parse more bits, bit reversing the label yields the source address.
     switchHeader->label_be = Bits_bitReverse64(switchHeader->label_be);
 
-    if (Headers_getMessageType(switchHeader) == Headers_SwitchHeader_TYPE_CONTROL) {
-        return handleControlMessage(context, message, switchHeader, switchIf);
+    #ifdef Version_7_COMPAT
+    if (SwitchHeader_getMessageType(switchHeader) == SwitchHeader_TYPE_CONTROL) {
+        return handleControlMessage(context, message, switchHeader, switchIf, false);
     }
+    #endif
 
     if (message->length < 8) {
         Log_info(context->logger, "runt");
@@ -1113,10 +1119,6 @@ static uint8_t incomingFromSwitch(struct Message* message, struct Interface* swi
 
     Assert_true(!(message->capacity % 4));
 
-    #ifdef Version_2_COMPAT
-    translateVersion2(message, dtHeader);
-    #endif
-
     // #1 try to get the session using the handle.
 
     uint32_t nonceOrHandle = Endian_bigEndianToHost32(((uint32_t*)message->bytes)[0]);
@@ -1124,9 +1126,14 @@ static uint8_t incomingFromSwitch(struct Message* message, struct Interface* swi
     struct SessionManager_Session* session = NULL;
 
     if (nonceOrHandle > 3) {
+        Message_shift(message, -4, NULL);
+        if (nonceOrHandle == 0xffffffff) {
+            return handleControlMessage(context, message, switchHeader, switchIf, true);
+        }
+
         // Run message, it's a handle.
         session = SessionManager_sessionForHandle(nonceOrHandle, context->sm);
-        Message_shift(message, -4, NULL);
+
         if (session) {
             uint32_t nonce = Endian_bigEndianToHost32(((uint32_t*)message->bytes)[0]);
             if (nonce == ~0u) {
@@ -1143,8 +1150,8 @@ static uint8_t incomingFromSwitch(struct Message* message, struct Interface* swi
         } else {
             Log_debug(context->logger, "Got message with unrecognized handle");
         }
-    } else if (message->length >= Headers_CryptoAuth_SIZE) {
-        union Headers_CryptoAuth* caHeader = (union Headers_CryptoAuth*) message->bytes;
+    } else if (message->length >= CryptoHeader_SIZE) {
+        union CryptoHeader* caHeader = (union CryptoHeader*) message->bytes;
         uint8_t ip6[16];
         uint8_t* herKey = caHeader->handshake.publicKey;
         AddressCalc_addressForPublicKey(ip6, herKey);

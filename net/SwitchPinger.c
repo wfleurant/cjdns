@@ -21,7 +21,7 @@
 #include "util/Pinger.h"
 #include "util/version/Version.h"
 #include "util/Identity.h"
-#include "wire/Headers.h"
+#include "wire/SwitchHeader.h"
 #include "wire/Control.h"
 #include "wire/Error.h"
 
@@ -75,11 +75,21 @@ struct Ping
 static uint8_t receiveMessage(struct Message* msg, struct Interface* iface)
 {
     struct SwitchPinger* ctx = Identity_check((struct SwitchPinger*) iface->receiverContext);
-    struct Headers_SwitchHeader* switchHeader = (struct Headers_SwitchHeader*) msg->bytes;
+    struct SwitchHeader* switchHeader = (struct SwitchHeader*) msg->bytes;
     ctx->incomingLabel = Endian_bigEndianToHost64(switchHeader->label_be);
     ctx->incomingVersion = 0;
-    Assert_true(Headers_getMessageType(switchHeader) == Headers_SwitchHeader_TYPE_CONTROL);
-    Message_shift(msg, -Headers_SwitchHeader_SIZE, NULL);
+    Message_shift(msg, -SwitchHeader_SIZE, NULL);
+
+    uint32_t handle = Message_pop32(msg, NULL);
+    #ifdef Version_7_COMPAT
+    if (handle != 0xffffffff) {
+        Message_push32(msg, handle, NULL);
+        handle = 0xffffffff;
+        Assert_true(SwitchHeader_getMessageType(switchHeader) == SwitchHeader_TYPE_CONTROL);
+    }
+    #endif
+    Assert_true(handle == 0xffffffff);
+
     struct Control* ctrl = (struct Control*) msg->bytes;
     if (ctrl->type_be == Control_PONG_be) {
         Message_shift(msg, -Control_HEADER_SIZE, NULL);
@@ -105,7 +115,7 @@ static uint8_t receiveMessage(struct Message* msg, struct Interface* iface)
         Message_push32(msg, 0, NULL);
         Message_shift(msg, -(
             Control_Error_HEADER_SIZE
-          + Headers_SwitchHeader_SIZE
+          + SwitchHeader_SIZE
           + Control_HEADER_SIZE
           + Control_Ping_HEADER_SIZE
         ), NULL);
@@ -165,10 +175,23 @@ static void sendPing(String* data, void* sendPingContext)
     ctrl->type_be = Control_PING_be;
     ctrl->checksum_be = Checksum_engine(msg->bytes, msg->length);
 
-    Message_shift(msg, Headers_SwitchHeader_SIZE, NULL);
-    struct Headers_SwitchHeader* switchHeader = (struct Headers_SwitchHeader*) msg->bytes;
+    #ifdef Version_7_COMPAT
+        if (0) {
+    #endif
+    Message_push32(msg, 0xffffffff, NULL);
+    #ifdef Version_7_COMPAT
+        }
+    #endif
+
+    Message_shift(msg, SwitchHeader_SIZE, NULL);
+    struct SwitchHeader* switchHeader = (struct SwitchHeader*) msg->bytes;
     switchHeader->label_be = Endian_hostToBigEndian64(p->label);
-    Headers_setPriorityAndMessageType(switchHeader, 0, Headers_SwitchHeader_TYPE_CONTROL);
+
+    SwitchHeader_setPriority(switchHeader, 0);
+    SwitchHeader_setCongestion(switchHeader, 0);
+    #ifdef Version_7_COMPAT
+        SwitchHeader_setPriorityAndMessageType(switchHeader, 0, SwitchHeader_TYPE_CONTROL);
+    #endif
 
     p->context->iface->sendMessage(msg, p->context->iface);
 }
