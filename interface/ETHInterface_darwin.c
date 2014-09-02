@@ -29,6 +29,7 @@
 #include "util/AddrTools.h"
 #include "util/version/Version.h"
 #include "util/events/Timeout.h"
+#include "util/Base32.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -169,17 +170,13 @@ static void handleBeacon(struct Message* msg, struct ETHInterface* context)
         return;
     }
 
-    struct Headers_Beacon* beacon = (struct Headers_Beacon*) msg->bytes;
+    struct Headers_Beacon* beacon = (struct Headers_Beacon*) (msg->bytes + sizeof(uint8_t)*2);
 
     uint32_t theirVersion = Endian_bigEndianToHost32(beacon->version_be);
     if (!Version_isCompatible(theirVersion, Version_CURRENT_PROTOCOL)) {
         #ifdef Log_DEBUG
             uint8_t mac[18];
-            snprintf((char*)mac,
-                18,
-                "%02x:%02x:%02x:%02x:%02x:%02x\n",
-                src[0], src[1], src[2], src[3], src[4], src[5]);
-            //AddrTools_printMac(mac, addr.sll_addr);
+            AddrTools_printMac(mac, src);
             Log_debug(context->logger, "Dropped beacon from [%s] which was version [%d] "
                       "our version is [%d] making them incompatable",
                       mac, theirVersion, Version_CURRENT_PROTOCOL);
@@ -189,12 +186,13 @@ static void handleBeacon(struct Message* msg, struct ETHInterface* context)
 
     #ifdef Log_DEBUG
         uint8_t mac[18];
-        //AddrTools_printMac(mac, addr.sll_addr);
-        snprintf((char*)mac,
-            18,
-            "%02x:%02x:%02x:%02x:%02x:%02x\n",
-            src[0], src[1], src[2], src[3], src[4], src[5]);
-        Log_debug(context->logger, "Got beacon from [%s]", mac);
+        AddrTools_printMac(mac, src);
+        uint8_t publicKey[52];
+        uint8_t publicKeyHex[128];
+        Base32_encode(publicKey, 52, beacon->publicKey, 32);
+        Hex_encode(publicKeyHex, 128, beacon->publicKey, 32);
+        Log_debug(context->logger, "Got beacon from [%s] with pubkey [%s.k] hex: [%s]",
+                mac, publicKey, publicKeyHex);
     #endif
 
     String passStr = { .bytes = (char*) beacon->password, .len = Headers_Beacon_PASSWORD_LEN };
@@ -206,9 +204,9 @@ static void handleBeacon(struct Message* msg, struct ETHInterface* context)
                                                true,
                                                iface);
     if (ret != 0) {
-//        uint8_t mac[18];
-//        AddrTools_printMac(mac, addr.sll_addr);
-//  Log_info(context->logger, "Got beacon from [%s] and registerPeer returned [%d]", mac, ret);
+        uint8_t mac[18];
+        AddrTools_printMac(mac, src);
+        Log_info(context->logger, "Got beacon from [%s] and registerPeer returned [%d]", mac, ret);
     }
 
 }
@@ -234,6 +232,11 @@ static void sendBeacon(void* vcontext)
         .padding=ETHER_HDR_LEN,
         .length=sizeof(struct Headers_Beacon) + 8
     };
+
+    uint8_t beaconHex[sizeof(struct Headers_Beacon)*2];
+    Hex_encode(beaconHex, sizeof(struct Headers_Beacon)*2,
+            (const uint8_t *)&content.beacon, sizeof(struct Headers_Beacon));
+    Log_debug(context->logger, "Sending beacon [%s]", beaconHex);
 
     int ret;
     if ((ret = sendMessage(&m, &context->generic)) != 0) {
@@ -305,9 +308,9 @@ static void handleEvent(void* vcontext)
 }
 
 int ETHInterface_beginConnection(const char* macAddress,
-                                 uint8_t cryptoKey[32],
-                                 String* password,
-                                 struct ETHInterface* ethIf)
+        uint8_t cryptoKey[32],
+        String* password,
+        struct ETHInterface* ethIf)
 {
     Identity_check(ethIf);
 
@@ -316,7 +319,7 @@ int ETHInterface_beginConnection(const char* macAddress,
     uint8_t* MAC = LLADDR(&addr);
 
     printf("MAC = %02x:%02x:%02x:%02x:%02x:%02x\n",
-        MAC[0], MAC[1], MAC[2], MAC[3], MAC[4], MAC[5]);
+            MAC[0], MAC[1], MAC[2], MAC[3], MAC[4], MAC[5]);
 
 
     printf("connection!\n");
@@ -337,7 +340,7 @@ int ETHInterface_beginConnection(const char* macAddress,
                 return ETHInterface_beginConnection_OUT_OF_SPACE;
 
             default:
-              return ETHInterface_beginConnection_UNKNOWN_ERROR;
+                return ETHInterface_beginConnection_UNKNOWN_ERROR;
         }
     }
 
@@ -358,22 +361,22 @@ int ETHInterface_beacon(struct ETHInterface* ethIf, int* state)
 }
 
 struct ETHInterface* ETHInterface_new(struct EventBase* base,
-                                      const char* bindDevice,
-                                      struct Allocator* allocator,
-                                      struct Except* exHandler,
-                                      struct Log* logger,
-                                      struct InterfaceController* ic)
+        const char* bindDevice,
+        struct Allocator* allocator,
+        struct Except* exHandler,
+        struct Log* logger,
+        struct InterfaceController* ic)
 {
     struct ETHInterface* context = Allocator_clone(allocator, (&(struct ETHInterface) {
-        .generic = {
-            .sendMessage = sendMessage,
-            .allocator = allocator
-        },
-        .logger = logger,
-        .ic = ic,
-        .id = getpid(),
-        .buf_len = 1
-    }));
+                .generic = {
+                .sendMessage = sendMessage,
+                .allocator = allocator
+                },
+                .logger = logger,
+                .ic = ic,
+                .id = getpid(),
+                .buf_len = 1
+                }));
 
     Identity_set(context);
 
