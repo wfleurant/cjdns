@@ -296,9 +296,6 @@ static void peersResponseCallback(struct RouterModule_Promise* promise,
                                addresses->elems[i].ip6.bytes,
                                Address_SEARCH_TARGET_SIZE))
         {
-            addresses->elems[i].path = NodeStore_optimizePath(janitor->nodeStore,
-                                                              addresses->elems[i].path);
-
             struct Node_Two* node = NodeStore_nodeForAddr(janitor->nodeStore,
                                                           addresses->elems[i].ip6.bytes);
             if (node) {
@@ -404,17 +401,14 @@ static struct Node_Two* getRandomNode(struct Random* rand, struct NodeStore* sto
 
 static void getPeersMill(struct Janitor* janitor, struct Address* addr)
 {
-    addr->path = NodeStore_optimizePath(janitor->nodeStore, addr->path);
-    if (NodeStore_optimizePath_INVALID != addr->path) {
-        struct RouterModule_Promise* rp =
-            RouterModule_getPeers(addr,
-                                  Random_uint32(janitor->rand),
-                                  0,
-                                  janitor->routerModule,
-                                  janitor->allocator);
-        rp->callback = peersResponseCallback;
-        rp->userData = janitor;
-    }
+    struct RouterModule_Promise* rp =
+        RouterModule_getPeers(addr,
+                              Random_uint32(janitor->rand),
+                              0,
+                              janitor->routerModule,
+                              janitor->allocator);
+    rp->callback = peersResponseCallback;
+    rp->userData = janitor;
 }
 
 static void maintanenceCycle(void* vcontext)
@@ -489,13 +483,15 @@ static void maintanenceCycle(void* vcontext)
             {
                 addr.path = path;
             }
-            getPeersMill(janitor, &addr);
-            #ifdef Log_DEBUG
-                uint8_t addrStr[60];
-                Address_print(addrStr, &addr);
-                Log_debug(janitor->logger, "Pinging random node link [%s] for maintenance.",
-                                                                                   addrStr);
-            #endif
+            if (addr.path < UINT64_MAX) {
+                getPeersMill(janitor, &addr);
+                #ifdef Log_DEBUG
+                    uint8_t addrStr[60];
+                    Address_print(addrStr, &addr);
+                    Log_debug(janitor->logger, "Pinging random node link [%s] for maintenance.",
+                                                                                       addrStr);
+                #endif
+            }
         }
 
     } else if (RumorMill_getNode(janitor->nodeMill, &addr)) {

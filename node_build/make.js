@@ -23,7 +23,7 @@ var CanCompile = require('./CanCompile');
 var Builder = require('./builder');
 var TestRunner = require('./TestRunner');
 
-// ['linux','darwin','sunos','win32','freebsd']
+// ['linux','darwin','sunos','win32','freebsd','openbsd']
 var SYSTEM = process.env['SYSTEM'] || process.platform;
 var GCC = process.env['CC'];
 var CFLAGS = process.env['CFLAGS'];
@@ -32,6 +32,8 @@ var LDFLAGS = process.env['LDFLAGS'];
 if (!GCC) {
     if (SYSTEM === 'freebsd') {
         GCC = 'gcc47';
+    } else if (SYSTEM === 'openbsd') {
+        GCC = 'egcc';
     } else {
         GCC = 'gcc';
     }
