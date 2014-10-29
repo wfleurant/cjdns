@@ -21,6 +21,7 @@
 
 #include "crypto_scalarmult_curve25519.h"
 
+#include <signal.h>
 #include <stdio.h>
 
 int main(int argc, char** argv)
@@ -35,14 +36,17 @@ int main(int argc, char** argv)
     uint8_t hexPrivateKey[65];
     uint8_t printedIp[40];
 
+    signal(SIGPIPE,SIG_DFL);
+
     for (;;) {
         Random_bytes(rand, privateKey, 32);
         crypto_scalarmult_curve25519_base(publicKey, privateKey);
         if (AddressCalc_addressForPublicKey(ip, publicKey)) {
             Hex_encode(hexPrivateKey, 65, privateKey, 32);
             Base32_encode(publicKeyBase32, 53, publicKey, 32);
-            AddrTools_printIp(printedIp, ip);
+            AddrTools_printShortIp(printedIp, ip);
             printf("%s %s %s.k\n", hexPrivateKey, printedIp, publicKeyBase32);
+            fflush(stdout);
         }
     }
     return 0;

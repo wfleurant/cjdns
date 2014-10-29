@@ -17,11 +17,13 @@
 
 #include "admin/Admin.h"
 #include "dht/dhtcore/RouterModule.h"
+#include "dht/dhtcore/Router.h"
 #include "memory/Allocator.h"
 #include "util/Linker.h"
 Linker_require("dht/dhtcore/RouterModule_admin.c")
 
 void RouterModule_admin_register(struct RouterModule* module,
+                                 struct Router* router,
                                  struct Admin* admin,
                                  struct Allocator* alloc);
 

@@ -20,8 +20,7 @@
 #include "dht/DHTModule.h"
 #include "dht/DHTModuleRegistry.h"
 #include "dht/dhtcore/Node.h"
-#include "dht/dhtcore/RouterModule.h"
-#include "dht/dhtcore/SearchRunner.h"
+#include "dht/dhtcore/Router.h"
 #include "dht/dhtcore/RumorMill.h"
 #include "interface/tuntap/TUNMessageType.h"
 #include "interface/Interface.h"
@@ -38,6 +37,7 @@
 #include "util/Assert.h"
 #include "tunnel/IpTunnel.h"
 #include "util/events/Time.h"
+#include "util/Defined.h"
 #include "wire/Control.h"
 #include "wire/Error.h"
 #include "wire/Headers.h"
@@ -227,7 +227,7 @@ static inline bool isRouterTraffic(struct Message* message, struct Headers_IP6He
 #define debugHandles(logger, session, message, ...) \
     do {                                                                               \
         uint8_t ip[40];                                                                \
-        AddrTools_printIp(ip, session->ip6);                                           \
+        AddrTools_printIp(ip, session->ip6);                                      \
         Log_debug(logger, "ver[%u] send[%d] recv[%u] ip[%s] " message,                 \
                   session->version,                                                    \
                   Endian_hostToBigEndian32(session->sendHandle_be),                    \
@@ -271,10 +271,10 @@ static inline uint8_t incomingForMe(struct Message* message,
     if (Bits_memcmp(addr.ip6.bytes, dtHeader->ip6Header->sourceAddr, 16)) {
         #ifdef Log_DEBUG
             uint8_t keyAddr[40];
-            Address_printIp(keyAddr, &addr);
+            Address_printShortIp(keyAddr, &addr);
             Bits_memcpyConst(addr.ip6.bytes, dtHeader->ip6Header->sourceAddr, 16);
             uint8_t srcAddr[40];
-            Address_printIp(srcAddr, &addr);
+            Address_printShortIp(srcAddr, &addr);
             Log_debug(context->logger,
                        "DROP packet because source address is not same as key.\n"
                        "    %s source addr\n"
@@ -292,7 +292,7 @@ static inline uint8_t incomingForMe(struct Message* message,
         if (Checksum_udpIp6(dtHeader->ip6Header->sourceAddr, (uint8_t*)uh, message->length)) {
             #ifdef Log_DEBUG
                 uint8_t keyAddr[40];
-                Address_printIp(keyAddr, &addr);
+                Address_printShortIp(keyAddr, &addr);
                 Log_debug(context->logger,
                           "DROP Router packet with incorrect checksum, from [%s]", keyAddr);
             #endif
@@ -475,7 +475,7 @@ static inline uint8_t incomingFromTun(struct Message* message,
     }
 
     struct Ducttape_MessageHeader* dtHeader = getDtHeader(message, true);
-    struct Node_Two* bestNext = RouterModule_lookup(header->destinationAddr, context->routerModule);
+    struct Node_Two* bestNext = Router_lookup(context->router, header->destinationAddr);
     struct SessionManager_Session* nextHopSession;
     if (bestNext) {
         nextHopSession = SessionManager_getSession(bestNext->address.ip6.bytes,
@@ -571,7 +571,7 @@ static uint8_t sendToNode(struct Message* message, struct Interface* iface)
     struct Ducttape_MessageHeader* dtHeader = getDtHeader(message, true);
     struct IpTunnel_PacketInfoHeader* header = (struct IpTunnel_PacketInfoHeader*) message->bytes;
     Message_shift(message, -IpTunnel_PacketInfoHeader_SIZE, NULL);
-    struct Node_Two* n = RouterModule_lookup(header->nodeIp6Addr, context->routerModule);
+    struct Node_Two* n = Router_lookup(context->router, header->nodeIp6Addr);
     if (n) {
         if (!Bits_memcmp(header->nodeKey, n->address.key, 32)) {
             // Found the node.
@@ -604,7 +604,7 @@ static uint8_t sendToNode(struct Message* message, struct Interface* iface)
     uint64_t now = Time_currentTimeMilliseconds(context->eventBase);
     if (context->timeOfLastSearch + context->timeBetweenSearches < now) {
         context->timeOfLastSearch = now;
-        SearchRunner_search(header->nodeIp6Addr, context->searchRunner, context->alloc);
+        Router_searchForNode(context->router, header->nodeIp6Addr, context->alloc);
     }
     return 0;
 }
@@ -683,7 +683,7 @@ static inline int core(struct Message* message,
 
     struct SessionManager_Session* nextHopSession = NULL;
     if (!dtHeader->nextHopReceiveHandle || !dtHeader->switchLabel) {
-        struct Node_Two* n = RouterModule_lookup(ip6Header->destinationAddr, context->routerModule);
+        struct Node_Two* n = Router_lookup(context->router, ip6Header->destinationAddr);
         if (n) {
             nextHopSession =
                 SessionManager_getSession(n->address.ip6.bytes, n->address.key, context->sm);
@@ -708,7 +708,7 @@ static inline int core(struct Message* message,
                     struct Address destination;
                     Bits_memcpyConst(destination.ip6.bytes, ip6Header->destinationAddr, 16);
                     uint8_t ipAddr[40];
-                    Address_printIp(ipAddr, &destination);
+                    Address_printShortIp(ipAddr, &destination);
                     Log_debug(context->logger, "Forwarding data to %s via %s\n", ipAddr, nhAddr);
                 #endif */
             } else {
@@ -723,7 +723,7 @@ static inline int core(struct Message* message,
         struct Address destination;
         Bits_memcpyConst(destination.ip6.bytes, ip6Header->destinationAddr, 16);
         uint8_t ipAddr[40];
-        Address_printIp(ipAddr, &destination);
+        Address_printShortIp(ipAddr, &destination);
         Log_info(context->logger, "DROP message because this node is the closest known "
                                    "node to the destination %s.", ipAddr);
     #endif
@@ -914,8 +914,13 @@ static uint8_t handleControlMessage(struct Ducttape_pvt* context,
     struct Control* ctrl = (struct Control*) message->bytes;
 
     if (Checksum_engine(message->bytes, message->length)) {
-        Log_info(context->logger, "DROP ctrl packet from [%s] with invalid checksum.", labelStr);
-        return Error_NONE;
+        if (Defined(Version_8_COMPAT) && isFormV8) {
+            Log_debug(context->logger, "ctrl packet from [%s] with invalid checksum v8compat",
+                                       labelStr);
+        } else {
+            Log_info(context->logger, "DROP ctrl packet from [%s] with invalid checksum", labelStr);
+            return Error_NONE;
+        }
     }
 
     bool pong = false;
@@ -927,19 +932,16 @@ static uint8_t handleControlMessage(struct Ducttape_pvt* context,
 
         uint64_t path = Endian_bigEndianToHost64(switchHeader->label_be);
         if (!LabelSplicer_isOneHop(path)) {
-            RouterModule_brokenPath(path, context->routerModule);
+            uint64_t labelAtStop = Endian_bigEndianToHost64(ctrl->content.error.cause.label_be);
+            Router_brokenLink(context->router, path, labelAtStop);
         }
 
         // Determine whether the "cause" packet is a control message.
         bool isCtrlCause = false;
         #ifdef Version_7_COMPAT
-            if (SwitchHeader_TYPE_CONTROL ==
-                SwitchHeader_getMessageType(&ctrl->content.error.cause))
-            {
+            if (SwitchHeader_isV7Ctrl(&ctrl->content.error.cause)) {
                 isCtrlCause = true;
-            } else if (SwitchHeader_TYPE_DATA <
-                SwitchHeader_getMessageType(&ctrl->content.error.cause))
-            {
+            } else {
         #endif
         if (ctrl->content.error.causeHandle == 0xffffffff) {
             isCtrlCause = true;
@@ -956,7 +958,7 @@ static uint8_t handleControlMessage(struct Ducttape_pvt* context,
                 return Error_NONE;
             }
             struct Control* causeCtrl = (struct Control*) &(&ctrl->content.error.cause)[1];
-            if (causeCtrl->type_be != Control_PING_be) {
+            if (causeCtrl->type_be != Control_PING_be && causeCtrl->type_be != Control_KEYPING_be) {
                 #ifdef Log_INFO
                     uint32_t errorType =
                         Endian_bigEndianToHost32(ctrl->content.error.errorType_be);
@@ -1030,8 +1032,10 @@ static uint8_t handleControlMessage(struct Ducttape_pvt* context,
 
         Message_shift(message, -Control_HEADER_SIZE, NULL);
 
-        if (message->length < Control_KeyPing_MIN_SIZE) {
-            Log_info(context->logger, "DROP runt keyping");
+        if (message->length < Control_KeyPing_HEADER_SIZE
+            || message->length > Control_KeyPing_MAX_SIZE)
+        {
+            Log_info(context->logger, "DROP incorrect size keyping");
             return Error_INVALID;
         }
 
@@ -1046,11 +1050,6 @@ static uint8_t handleControlMessage(struct Ducttape_pvt* context,
             String* addrStr = Address_toString(&herAddr, message->alloc);
             Log_debug(context->logger, "got switch keyPing from [%s]", addrStr->bytes);
         #endif
-
-        if (message->length > Control_KeyPing_MIN_SIZE + 64) {
-            Log_debug(context->logger, "DROP oversize keyping message");
-            return Error_INVALID;
-        }
 
         keyPing->magic = Control_KeyPong_MAGIC;
         uint32_t herVersion = Endian_bigEndianToHost32(keyPing->version_be);
@@ -1107,7 +1106,7 @@ static uint8_t incomingFromSwitch(struct Message* message, struct Interface* swi
     switchHeader->label_be = Bits_bitReverse64(switchHeader->label_be);
 
     #ifdef Version_7_COMPAT
-    if (SwitchHeader_getMessageType(switchHeader) == SwitchHeader_TYPE_CONTROL) {
+    if (SwitchHeader_isV7Ctrl(switchHeader)) {
         return handleControlMessage(context, message, switchHeader, switchIf, false);
     }
     #endif
@@ -1204,8 +1203,7 @@ static uint8_t incomingFromPinger(struct Message* message, struct Interface* ifa
 
 struct Ducttape* Ducttape_register(uint8_t privateKey[32],
                                    struct DHTModuleRegistry* registry,
-                                   struct RouterModule* routerModule,
-                                   struct SearchRunner* searchRunner,
+                                   struct Router* router,
                                    struct SwitchCore* switchCore,
                                    struct EventBase* eventBase,
                                    struct Allocator* allocator,
@@ -1215,11 +1213,10 @@ struct Ducttape* Ducttape_register(uint8_t privateKey[32],
 {
     struct Ducttape_pvt* context = Allocator_calloc(allocator, sizeof(struct Ducttape_pvt), 1);
     context->registry = registry;
-    context->routerModule = routerModule;
+    context->router = router;
     context->logger = logger;
     context->eventBase = eventBase;
     context->alloc = allocator;
-    context->searchRunner = searchRunner;
     Bits_memcpyConst(&context->pub.magicInterface, (&(struct Interface) {
         .sendMessage = magicInterfaceSendMessage,
         .allocator = allocator

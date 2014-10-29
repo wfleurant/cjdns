@@ -28,6 +28,9 @@ Linker_require("dht/Address.c")
 #define Address_SEARCH_TARGET_SIZE 16
 #define Address_SERIALIZED_SIZE 40
 
+// Don't undefine this yet, new code will depend on it so that it can be tracked down and changed.
+#define Address_ROT64
+
 struct Address
 {
     /** The protocol version of the node. */
@@ -70,6 +73,8 @@ struct Address_List* Address_List_new(uint32_t length, struct Allocator* alloc);
 
 uint32_t Address_getPrefix(struct Address* addr);
 
+uint32_t Address_prefixForIp6(uint8_t ip6[16]);
+
 uint32_t Address_prefixForSearchTarget(const uint8_t searchTarget[16]);
 
 void Address_serialize(uint8_t output[Address_SERIALIZED_SIZE], const struct Address* addr);
@@ -88,6 +93,8 @@ bool Address_equalsSearchTarget(struct Address* addr,
 void Address_forKey(struct Address* out, const uint8_t key[Address_KEY_SIZE]);
 
 void Address_printIp(uint8_t output[40], struct Address* addr);
+
+void Address_printShortIp(uint8_t output[40], struct Address* addr);
 
 void Address_print(uint8_t output[60], struct Address* addr);
 

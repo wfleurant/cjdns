@@ -143,6 +143,44 @@ static inline void AddrTools_printIp(uint8_t output[40], const uint8_t binIp[16]
     output[39] = '\0';
 }
 
+static inline void AddrTools_printShortIp(uint8_t output[40], const uint8_t binIp[16])
+{
+    /* The chances of hitting :0:0: and breaking
+     * RFC5952 are 1 in (1 / (2^16))^2 * 6.
+     * E. Siler
+     */
+
+    char *p = output;
+    int i = 0;
+    for (; i < 16;) {
+        if ((size_t)p != (size_t)output) {
+            *p++= ':';
+        }
+
+        if (binIp[i] > 0x0F) {
+            Hex_encode(p, 2, &binIp[i++], 1);
+            p += 2;
+        } else if (binIp[i] > 0x00) {
+            *p++ = Hex_encodeLowNibble(binIp[i++]);
+        } else {
+            ++i;
+            if (binIp[i] > 0x0F) {
+                Hex_encode(p, 2, &binIp[i++], 1);
+                p += 2;
+            } else {
+                *p++ = Hex_encodeLowNibble(binIp[i++]);
+            }
+            continue;
+        }
+        Hex_encode(p, 2, &binIp[i++], 1);
+        p += 2;
+    }
+    *p = '\0';
+
+    Assert_true((size_t)p <= ((size_t)output + 40));
+    Assert_true(i <= 16);
+}
+
 /**
  * Parse out an address.
  *

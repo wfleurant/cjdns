@@ -20,6 +20,7 @@
 #include "util/Bits.h"
 #include "util/Endian.h"
 #include "util/Hex.h"
+#include "util/Defined.h"
 
 struct Address_List* Address_List_new(uint32_t length, struct Allocator* alloc)
 {
@@ -27,6 +28,12 @@ struct Address_List* Address_List_new(uint32_t length, struct Allocator* alloc)
     out->length = length;
     out->elems = Allocator_calloc(alloc, Address_SIZE, length);
     return out;
+}
+
+uint32_t Address_prefixForIp6(uint8_t ip6[16])
+{
+    uint32_t word = ((uint32_t*)ip6)[ Defined(Address_ROT64) ? 2 : 0 ];
+    return Endian_bigEndianToHost32(word);
 }
 
 uint32_t Address_getPrefix(struct Address* addr)
@@ -93,6 +100,12 @@ void Address_printIp(uint8_t output[40], struct Address* addr)
 {
     Address_getPrefix(addr);
     AddrTools_printIp(output, addr->ip6.bytes);
+}
+
+void Address_printShortIp(uint8_t output[40], struct Address* addr)
+{
+    Address_getPrefix(addr);
+    AddrTools_printShortIp(output, addr->ip6.bytes);
 }
 
 void Address_print(uint8_t output[60], struct Address* addr)

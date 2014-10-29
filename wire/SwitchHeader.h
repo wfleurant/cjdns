@@ -20,6 +20,7 @@
 #include "util/version/Version.h"
 
 #include <stdint.h>
+#include <stdbool.h>
 
 /**
  * The header which switches use to decide where to route traffic.
@@ -31,7 +32,7 @@
  *    +                         Switch Label                          +
  *  4 |                                                               |
  *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- *  8 |   Congest   |S|                  Priority                     |
+ *  8 |   Congest   |S| V |labelShift |            Penalty            |
  *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  *
  * Versions <= 7 byte number 8 is message type but the only 2 defined types were 0 (data)
@@ -42,11 +43,10 @@
  * Conveinently, all pre v8 versions will set the flag on every ctrl packet (including all errors).
  * Versions >= 8 will set congest to non-zero as a way to tell themselves apart from versions < 8
  * Versions < 8 are treating the byte as a number so all bits of congest will be zero.
+ * Version >= 11 labelShift is the number of bits which the label has been shifted to the right
+ *               in the course of switching. Switches older than 11 will not update this value!
+ *               Penalty is used for QoS, see Penalty.h
  */
-#ifdef Version_7_COMPAT
-    #define SwitchHeader_TYPE_DATA 0
-    #define SwitchHeader_TYPE_CONTROL 1
-#endif
 
 #pragma pack(push)
 #pragma pack(4)
@@ -58,70 +58,88 @@ struct SwitchHeader
     /**
      * Top 7 bits: congest
      * Next bit: suppressErrors
-     *
-     * Bottom 24 bits: priority
-     * Anti-flooding, this is a big endian uint32_t with the high 8 bits cut off.
-     *
-     * This entire number is in big endian encoding.
+     * In versions <= 7, this byte was set to 0 for data and 1 for ctrl packets.
      */
-    uint32_t lowBits_be;
+    uint8_t congestAndSuppressErrors;
+
+    /**
+     * High 2 bits: the version of the switch sending the packet.
+     * Low 6 bits: the number of bits which the label has been shifted in the process of switching
+     *             the packet.
+     */
+    uint8_t versionAndLabelShift;
+
+    /** QoS Penalty, see Penalty.h */
+    uint16_t penalty_be;
 };
 #define SwitchHeader_SIZE 12
 Assert_compileTime(sizeof(struct SwitchHeader) == SwitchHeader_SIZE);
 #pragma pack(pop)
 
+#define SwitchHeader_MASK(x) ( (1 << (x)) - 1 )
+
+#define SwitchHeader_CURRENT_VERSION 1
+
+static inline uint32_t SwitchHeader_getVersion(const struct SwitchHeader* header)
+{
+    return header->versionAndLabelShift >> 6;
+}
+
+static inline bool SwitchHeader_isV7Ctrl(const struct SwitchHeader* header)
+{
+    return !SwitchHeader_getVersion(header) && (header->congestAndSuppressErrors == 1);
+}
+
+static inline void SwitchHeader_setVersion(struct SwitchHeader* header, uint8_t version)
+{
+    Assert_true(version < 4);
+    header->versionAndLabelShift =
+        (version << 6) | (header->versionAndLabelShift & SwitchHeader_MASK(6));
+}
+
+static inline uint32_t SwitchHeader_getLabelShift(const struct SwitchHeader* header)
+{
+    return header->versionAndLabelShift & SwitchHeader_MASK(6);
+}
+
+static inline void SwitchHeader_setLabelShift(struct SwitchHeader* header, uint32_t shift)
+{
+    Assert_true(shift < 64);
+    header->versionAndLabelShift = header->versionAndLabelShift >> 6 << 6;
+    header->versionAndLabelShift |= shift;
+}
+
 static inline uint32_t SwitchHeader_getCongestion(const struct SwitchHeader* header)
 {
-    return Endian_bigEndianToHost32(header->lowBits_be) >> 25;
+    return header->congestAndSuppressErrors >> 1;
 }
 
 static inline void SwitchHeader_setCongestion(struct SwitchHeader* header, uint32_t cong)
 {
     Assert_true(cong <= 127);
     if (!cong) { cong++; }
-    header->lowBits_be &= Endian_hostToBigEndian32( ~0xfe000000 );
-    header->lowBits_be |= Endian_hostToBigEndian32( cong << 25 );
+    header->congestAndSuppressErrors = (header->congestAndSuppressErrors & 1) | (cong << 1);
 }
 
-static inline uint32_t SwitchHeader_getPriority(const struct SwitchHeader* header)
+static inline uint16_t SwitchHeader_getPenalty(const struct SwitchHeader* header)
 {
-    return Endian_bigEndianToHost32(header->lowBits_be) & ((1 << 24) - 1);
+    return Endian_bigEndianToHost16(header->penalty_be);
 }
 
-static inline void SwitchHeader_setPriority(struct SwitchHeader* header, uint32_t priority)
+static inline void SwitchHeader_setPenalty(struct SwitchHeader* header, uint16_t penalty)
 {
-    Assert_true(priority <= ((1 << 24) - 1) );
-    header->lowBits_be &= Endian_hostToBigEndian32( ~((1 << 24) - 1) );
-    header->lowBits_be |= Endian_hostToBigEndian32( priority & ((1 << 24) - 1) );
+    header->penalty_be = Endian_hostToBigEndian16(penalty);
 }
 
 static inline bool SwitchHeader_getSuppressErrors(const struct SwitchHeader* header)
 {
-    return !!( Endian_hostToBigEndian32(1<<24) & header->lowBits_be );
+    return header->congestAndSuppressErrors & 1;
 }
 
 static inline void SwitchHeader_setSuppressErrors(struct SwitchHeader* header, bool suppress)
 {
-    if (suppress) {
-        header->lowBits_be |= Endian_hostToBigEndian32(1<<24);
-    } else {
-        header->lowBits_be &= Endian_hostToBigEndian32(~(1<<24));
-    }
+    header->congestAndSuppressErrors = header->congestAndSuppressErrors >> 1 << 1;
+    header->congestAndSuppressErrors |= suppress;
 }
-
-#ifdef Version_7_COMPAT
-static inline void SwitchHeader_setPriorityAndMessageType(struct SwitchHeader* header,
-                                                          const uint32_t priority,
-                                                          const uint32_t messageType)
-{
-    Assert_true(messageType < 2);
-    header->lowBits_be =
-        Endian_hostToBigEndian32( (priority & ((1 << 24) - 1)) | messageType << 24 );
-}
-static inline uint32_t SwitchHeader_getMessageType(struct SwitchHeader* header)
-{
-    return Endian_bigEndianToHost32(header->lowBits_be) >> 24;
-}
-#endif
 
 #endif

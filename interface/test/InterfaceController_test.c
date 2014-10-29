@@ -83,10 +83,10 @@ static int reconnectionNewEndpointTest(struct InterfaceController* ifController,
         Bits_memcpyConst(outgoing->bytes, "hello world", 12);
 
         Message_shift(outgoing, SwitchHeader_SIZE, NULL);
-        Bits_memcpyConst(outgoing->bytes, (&(struct SwitchHeader) {
-            .label_be = Endian_hostToBigEndian64(1),
-            .lowBits_be = 0
-        }), SwitchHeader_SIZE);
+        struct SwitchHeader switchHeader_st;
+        Bits_memset(&switchHeader_st, 0, SwitchHeader_SIZE);
+        switchHeader_st.label_be = Endian_hostToBigEndian64(1);
+        Bits_memcpyConst(outgoing->bytes, &switchHeader_st, SwitchHeader_SIZE);
 
         wrapped->sendMessage(outgoing, wrapped);
 
@@ -122,7 +122,7 @@ static int reconnectionNewEndpointTest(struct InterfaceController* ifController,
     }
 
     // check everything except the label
-    Assert_true(!CString_strcmp((char*)hexBuffer+16, "0000000068656c6c6f20776f726c6400"));
+    Assert_true(!CString_strcmp((char*)hexBuffer+24, "68656c6c6f20776f726c6400"));
     // check label: make sure the interface has been switched back into position 0.
     uint64_t label_be;
     Hex_decode((uint8_t*) &label_be, 8, hexBuffer, 16);

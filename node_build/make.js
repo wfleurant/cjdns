@@ -82,7 +82,6 @@ Builder.configure({
 
     if (builder.config.systemName === 'win32') {
         builder.config.cflags.push('-Wno-format');
-        builder.config.libs.push('-lssp');
     } else if (builder.config.systemName === 'linux') {
         builder.config.ldflags.push('-Wl,-z,relro,-z,now,-z,noexecstack');
         builder.config.cflags.push('-DHAS_ETH_INTERFACE=1');
@@ -146,9 +145,9 @@ Builder.configure({
 
     var uclibc = process.env['UCLIBC'] == '1';
     var libssp = process.env['SSP_SUPPORT'] == 'y';
-    if ((!uclibc && builder.config.systemName !== 'win32' && builder.config.systemName !== 'sunos')
-        || libssp)
-    {
+    if (builder.config.systemName == 'win32') {
+        builder.config.libs.push('-lssp');
+    } else if ((!uclibc && builder.config.systemName !== 'sunos') || libssp) {
         builder.config.cflags.push(
             // Broken GCC patch makes -fstack-protector-all not work
             // workaround is to give -fno-stack-protector first.
@@ -237,7 +236,7 @@ Builder.configure({
             builder.config.libs.push('-lrt'); // clock_gettime()
         } else if (builder.config.systemName === 'darwin') {
             builder.config.libs.push('-framework', 'CoreServices');
-        } else if (builder.config.systemName === 'freebsd') {
+        } else if (['freebsd', 'openbsd'].indexOf(builder.config.systemName) >= 0) {
             builder.config.cflags.push('-Wno-overlength-strings');
             builder.config.libs.push('-lkvm');
         } else if (builder.config.systemName === 'sunos') {
@@ -284,7 +283,7 @@ Builder.configure({
 
             //args.push('--root-target=libuv');
             if (/.*android.*/.test(builder.config.gcc)) {
-                args.push('-Dtarget_arch=arm', '-DOS=android');
+                args.push('-DOS=android');
             }
 
             if (builder.config.systemName === 'win32') {
@@ -292,6 +291,9 @@ Builder.configure({
             }
 
             var gyp = Spawn(python, args, {env:env, stdio:'inherit'});
+            gyp.on('error', function () {
+                console.error("couldn't launch gyp [" + python + "]");
+            });
             gyp.on('close', waitFor(function () {
                 var args = [
                     '-j', builder.processors,
@@ -306,7 +308,7 @@ Builder.configure({
                     args.push('CFLAGS=-fPIC');
                 }
 
-                var makeCommand = builder.config.systemName == 'freebsd' ? 'gmake' : 'make';
+                var makeCommand = ['freebsd', 'openbsd'].indexOf(builder.config.systemName) >= 0 ? 'gmake' : 'make';
                 var make = Spawn(makeCommand, args, {stdio: 'inherit'});
 
                 make.on('error', function (err) {
@@ -351,8 +353,9 @@ Builder.configure({
         Codestyle.lint(fileName, file, callback);
     });
 
+    var testcjdroute = builder.buildTest('test/testcjdroute.c');
     if (builder.config.crossCompiling) {
-        console.log("Cross compiling.  Test disabled.");
+        console.log("Cross compiling. Building, but not running tests.");
         return;
     }
 
@@ -360,7 +363,7 @@ Builder.configure({
     if (process.env['REMOTE_TEST']) {
         testRunner = TestRunner.remote(process.env['REMOTE_TEST'], ['all']);
     }
-    builder.buildTest('test/testcjdroute.c', testRunner);
+    builder.runTest(testcjdroute, testRunner);
 
 }).success(function (builder, waitFor) {
 
@@ -369,5 +372,12 @@ Builder.configure({
 }).failure(function (builder, waitFor) {
 
     console.log('\033[1;31mFailed to build cjdns.\033[0m');
+    process.exit(1);
+
+}).complete(function (builder, waitFor) {
+
+    if (builder.failure) {
+        process.exit(1);
+    }
 
 });

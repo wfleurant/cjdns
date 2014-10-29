@@ -18,6 +18,7 @@
 #include "util/Identity.h"
 #include "util/Assert.h"
 #include "util/Bits.h"
+#include "util/Defined.h"
 
 /**
  * The rumor mill is for new nodes which have been discovered by search and getPeers requests
@@ -34,6 +35,10 @@ struct RumorMill_pvt
 
     struct Address* addresses;
     int capacity;
+
+    struct Log* log;
+
+    const char* name;
 
     Identity
 };
@@ -75,13 +80,14 @@ static struct Address* getBest(struct RumorMill_pvt* rm)
     return best;
 }
 
-void RumorMill_addNode(struct RumorMill* mill, struct Address* addr)
+void RumorMill__addNode(struct RumorMill* mill, struct Address* addr, const char* file, int line)
 {
     struct RumorMill_pvt* rm = Identity_check((struct RumorMill_pvt*) mill);
+
     Address_getPrefix(addr);
 
     for (int i = 0; i < rm->pub.count; i++) {
-        if (rm->addresses[i].path == addr->path ||
+        if (rm->addresses[i].path == addr->path &&
             !Bits_memcmp(rm->addresses[i].key, addr->key, 32))
         {
             return;
@@ -97,6 +103,13 @@ void RumorMill_addNode(struct RumorMill* mill, struct Address* addr)
         replace = getWorst(rm);
     }
     Bits_memcpyConst(replace, addr, sizeof(struct Address));
+
+    if (Defined(Log_DEBUG)) {
+        uint8_t addrStr[60];
+        Address_print(addrStr, addr);
+        Log_debug(rm->log, "[%s] addNode(%s) count[%d] from [%s:%d]",
+                           rm->name, addrStr, rm->pub.count, file, line);
+    }
 }
 
 bool RumorMill_getNode(struct RumorMill* mill, struct Address* output)
@@ -113,7 +126,11 @@ bool RumorMill_getNode(struct RumorMill* mill, struct Address* output)
     return true;
 }
 
-struct RumorMill* RumorMill_new(struct Allocator* allocator, struct Address* selfAddr, int capacity)
+struct RumorMill* RumorMill_new(struct Allocator* allocator,
+                                struct Address* selfAddr,
+                                int capacity,
+                                struct Log* log,
+                                const char* name)
 {
     struct Allocator* alloc = Allocator_child(allocator);
     Address_getPrefix(selfAddr);
@@ -122,6 +139,8 @@ struct RumorMill* RumorMill_new(struct Allocator* allocator, struct Address* sel
     rm->addresses = Allocator_calloc(alloc, sizeof(struct Address), capacity);
     rm->capacity = capacity;
     rm->selfAddr = Allocator_clone(alloc, selfAddr);
+    rm->log = log;
+    rm->name = name;
     Identity_set(rm);
 
     return &rm->pub;

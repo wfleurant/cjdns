@@ -16,6 +16,7 @@
 #include "crypto/CryptoAuth_pvt.h"
 #include "interface/InterfaceController.h"
 #include "dht/dhtcore/RumorMill.h"
+#include "dht/dhtcore/Router.h"
 #include "memory/Allocator.h"
 #include "net/SwitchPinger.h"
 #include "util/Base32.h"
@@ -75,8 +76,7 @@ struct InterfaceController_pvt
     /** Switch for adding nodes when they are discovered. */
     struct SwitchCore* const switchCore;
 
-    /** Router needed to inject newly added nodes to bootstrap the system. */
-    struct RouterModule* const routerModule;
+    struct Router* const router;
 
     struct Random* const rand;
 
@@ -118,14 +118,9 @@ static inline struct InterfaceController_pvt* ifcontrollerForPeer(
     return Identity_check((struct InterfaceController_pvt*) ep->switchIf.senderContext);
 }
 
-static void onPingResponse(enum SwitchPinger_Result result,
-                           uint64_t label,
-                           String* data,
-                           uint32_t millisecondsLag,
-                           uint32_t version,
-                           void* onResponseContext)
+static void onPingResponse(struct SwitchPinger_Response* resp, void* onResponseContext)
 {
-    if (SwitchPinger_Result_OK != result) {
+    if (SwitchPinger_Result_OK != resp->res) {
         return;
     }
     struct InterfaceController_Peer* ep =
@@ -136,7 +131,7 @@ static void onPingResponse(enum SwitchPinger_Result result,
     Bits_memset(&addr, 0, sizeof(struct Address));
     Bits_memcpyConst(addr.key, CryptoAuth_getHerPublicKey(ep->cryptoAuthIf), 32);
     addr.path = ep->switchLabel;
-    addr.protocolVersion = version;
+    addr.protocolVersion = resp->version;
 
     #ifdef Log_DEBUG
         uint8_t addrStr[60];
@@ -145,25 +140,26 @@ static void onPingResponse(enum SwitchPinger_Result result,
         Base32_encode(key, 56, CryptoAuth_getHerPublicKey(ep->cryptoAuthIf), 32);
     #endif
 
-    if (!Version_isCompatible(Version_CURRENT_PROTOCOL, version)) {
+    if (!Version_isCompatible(Version_CURRENT_PROTOCOL, resp->version)) {
         Log_debug(ic->logger, "got switch pong from node [%s] with incompatible version [%d]",
-                  key, version);
+                  key, resp->version);
     } else {
-        Log_debug(ic->logger, "got switch pong from node [%s] with version [%d]", key, version);
+        Log_debug(ic->logger, "got switch pong from node [%s] with version [%d]",
+                  key, resp->version);
     }
 
     if (!ep->timeOfLastPing) {
         // We've never heard from this machine before (or we've since forgotten about it)
         // This is here because we want the tests to function without the janitor present.
         // Other than that, it just makes a slightly more synchronous/guaranteed setup.
-        RouterModule_getPeers(&addr, 0, 0, ic->routerModule, ic->allocator);
+        Router_sendGetPeers(ic->router, &addr, 0, 0, ic->allocator);
+    }
+
+    struct Node_Link* link = Router_linkForPath(ic->router, resp->label);
+    if (!link || !Node_getBestParent(link->child)) {
+        RumorMill_addNode(ic->rumorMill, &addr);
     } else {
-        struct Node_Two* nn = RouterModule_nodeForPath(label, ic->routerModule);
-        if (!nn) {
-            RumorMill_addNode(ic->rumorMill, &addr);
-        } else if (!Node_getBestParent(nn)) {
-            RouterModule_peerIsReachable(label, millisecondsLag, ic->routerModule);
-        }
+        Log_debug(ic->logger, "link exists");
     }
 
     ep->timeOfLastPing = Time_currentTimeMilliseconds(ic->eventBase);
@@ -172,11 +168,11 @@ static void onPingResponse(enum SwitchPinger_Result result,
         // This will be false if it times out.
         //Assert_true(label == ep->switchLabel);
         uint8_t path[20];
-        AddrTools_printPath(path, label);
+        AddrTools_printPath(path, resp->label);
         uint8_t sl[20];
         AddrTools_printPath(sl, ep->switchLabel);
         Log_debug(ic->logger, "Received [%s] from lazy endpoint [%s]  [%s]",
-                  SwitchPinger_resultString(result)->bytes, path, sl);
+                  SwitchPinger_resultString(resp->res)->bytes, path, sl);
     #endif
 }
 
@@ -227,7 +223,7 @@ static void pingCallback(void* vic)
 
     // scan for endpoints have not sent anything recently.
     uint32_t startAt = Random_uint32(ic->rand) % ic->peerMap.count;
-    for (uint32_t i = startAt, count = 0; !count || i != startAt;) {
+    for (uint32_t i = startAt, count = 0; (!count || i != startAt) && count <= ic->peerMap.count;) {
         i = (i + 1) % ic->peerMap.count;
         count++;
 
@@ -239,11 +235,14 @@ static void pingCallback(void* vic)
                 // because it causes the RumorMill to be filled with this node over and over.
                 continue;
             }
-            // This is here because of a pathological state where the connection is in ESTABLISHED
-            // state but the *direct peer* has somehow been dropped from the routing table
-            // usually because of a call to NodeStore_brokenPath()
-            struct Node_Two* peerNode = RouterModule_nodeForPath(ep->switchLabel, ic->routerModule);
-            if (peerNode && Node_getBestParent(peerNode)) {
+
+            struct Node_Link* link = Router_linkForPath(ic->router, ep->switchLabel);
+            // It exists, it's parent is the self-node, and it's label is equal to the switchLabel.
+            if (link
+                && Node_getBestParent(link->child)
+                && Node_getBestParent(link->child)->parent->address.path == 1
+                && Node_getBestParent(link->child)->cannonicalLabel == ep->switchLabel)
+            {
                 continue;
             }
         }
@@ -265,8 +264,8 @@ static void pingCallback(void* vic)
 
         bool unresponsive = (now > ep->timeOfLastMessage + ic->unresponsiveAfterMilliseconds);
         if (unresponsive) {
-            // flush the peer from the table...
-            RouterModule_brokenPath(ep->switchLabel, ic->routerModule);
+            // our link to the peer is broken...
+            Router_disconnectedPeer(ic->router, ep->switchLabel);
 
             // Lets skip 87% of pings when they're really down.
             if (ep->pingCount % 8) {
@@ -304,6 +303,8 @@ static void moveEndpointIfNeeded(struct InterfaceController_Peer* ep,
         if (thisEp != ep && !Bits_memcmp(thisKey, key, 32)) {
             Log_info(ic->logger, "Moving endpoint to merge new session with old.");
 
+            // flush out the new entry if needed.
+            Router_disconnectedPeer(ic->router, ep->switchLabel);
             ep->switchLabel = thisEp->switchLabel;
             SwitchCore_swapInterfaces(&thisEp->switchIf, &ep->switchIf);
             Allocator_free(thisEp->external->allocator);
@@ -318,6 +319,9 @@ static uint8_t receivedAfterCryptoAuth(struct Message* msg, struct Interface* cr
     struct InterfaceController_Peer* ep =
         Identity_check((struct InterfaceController_Peer*) cryptoAuthIf->receiverContext);
     struct InterfaceController_pvt* ic = ifcontrollerForPeer(ep);
+
+    // nonce added by the CryptoAuth session.
+    Message_pop(msg, NULL, 4, NULL);
 
     ep->bytesIn += msg->length;
 
@@ -386,6 +390,13 @@ static uint8_t sendFromSwitch(struct Message* msg, struct Interface* switchIf)
         ret = Interface_sendMessage(ep->cryptoAuthIf, msg);
     }
 
+    // TODO(cjd): this is not quite right
+    // We don't always trust the UDP interface to be accurate
+    // short spurious failures and packet-backup should not cause us to treat a link as dead
+    if (ret == Error_UNDELIVERABLE) {
+        ret = 0;
+    }
+
     // If this node is unresponsive then return an error.
     if (ret || now - ep->timeOfLastMessage > ic->unresponsiveAfterMilliseconds) {
         return ret ? ret : Error_UNDELIVERABLE;
@@ -407,7 +418,7 @@ static int closeInterface(struct Allocator_OnFreeJob* job)
     struct InterfaceController_pvt* ic = ifcontrollerForPeer(toClose);
 
     // flush the peer from the table...
-    RouterModule_brokenPath(toClose->switchLabel, ic->routerModule);
+    Router_disconnectedPeer(ic->router, toClose->switchLabel);
 
     int index = Map_OfIFCPeerByExernalIf_indexForHandle(toClose->handle, &ic->peerMap);
     Assert_true(index >= 0);
@@ -599,7 +610,7 @@ int InterfaceController_disconnectPeer(struct InterfaceController* ifController,
 
 struct InterfaceController* InterfaceController_new(struct CryptoAuth* ca,
                                                     struct SwitchCore* switchCore,
-                                                    struct RouterModule* routerModule,
+                                                    struct Router* router,
                                                     struct RumorMill* rumorMill,
                                                     struct Log* logger,
                                                     struct EventBase* eventBase,
@@ -617,7 +628,7 @@ struct InterfaceController* InterfaceController_new(struct CryptoAuth* ca,
         .ca = ca,
         .rand = rand,
         .switchCore = switchCore,
-        .routerModule = routerModule,
+        .router = router,
         .rumorMill = rumorMill,
         .logger = logger,
         .eventBase = eventBase,

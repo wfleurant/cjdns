@@ -146,11 +146,15 @@ var mkBuilder = function (state) {
             var temp = state.buildDir + '/' + getExecutableFile(cFile);
             compile(cFile, temp, builder, builder.waitFor());
             builder.executables.push([temp, outputFile]);
+
+            return temp;
         },
 
-        buildTest: function (cFile, testRunner) {
-            var outFile = state.buildDir + '/' + getExecutableFile(cFile);
-            compile(cFile, outFile, builder, builder.waitFor());
+        buildTest: function (cFile) {
+            return builder.buildExecutable(cFile, state.buildDir + '/' + getExecutableFile(cFile));
+        },
+
+        runTest: function (outFile, testRunner) {
             builder.tests.push(function (cb) { testRunner(outFile, cb); });
         },
 
@@ -1019,6 +1023,7 @@ var configure = module.exports.configure = function (params, configFunc) {
         debug("Test " + time() + "ms");
 
         builder.executables.forEach(function (array) {
+            if (array[1] === array[0]) { return; }
             Fs.rename(array[0], array[1], waitFor(function (err) {
                 // TODO(cjd): It would be better to know in advance whether to expect the file.
                 if (err && err.code !== 'ENOENT') {

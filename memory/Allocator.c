@@ -92,7 +92,7 @@ static void failure(struct Allocator_pvt* context,
                     const char* fileName,
                     int lineNum)
 {
-    Allocator_snapshot(&context->pub, 0);
+    Allocator_snapshot(&context->pub, 1);
     Assert_failure("%s:%d Fatal error: [%s]", fileName, lineNum, message);
 }
 
@@ -691,8 +691,8 @@ struct Allocator* Allocator_new(unsigned long sizeLimit,
                 .lineNum = lineNum,
             },
             #ifdef Allocator_USE_CANARIES
-            .canary = (unsigned long) CompileTimeRandom_uint64(),
-            .nextCanary = (unsigned long) CompileTimeRandom_uint64(),
+            .canary = (unsigned long) Constant_rand64(),
+            .nextCanary = (unsigned long) Constant_rand64(),
             #endif
         }
     };
