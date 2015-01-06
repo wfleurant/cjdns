@@ -26,6 +26,7 @@
 #include "util/Gcc.h"
 #include "util/Defined.h"
 #include "util/Endian.h"
+#include "util/events/Time.h"
 
 #include <tree.h>
 
@@ -54,6 +55,9 @@ struct NodeStore_pvt
 
     /** The means for this node store to log. */
     struct Log* logger;
+
+    /** To track time, for e.g. figuring out when nodes were last pinged */
+    struct EventBase* eventBase;
 
     Identity
 };
@@ -312,7 +316,7 @@ static void update(struct Node_Link* link,
 {
     if (linkStateDiff + link->linkState > UINT32_MAX) {
         link->linkState = UINT32_MAX;
-        logLink(store, link, "link state set to maximum");
+        //logLink(store, link, "link state set to maximum");
     } else if (linkStateDiff + link->linkState < 0) {
         link->linkState = 0;
         logLink(store, link, "link state set to zero");
@@ -393,6 +397,13 @@ static uint32_t guessReachOfChild(struct Node_Link* link)
     if (guess < Node_getReach(link->parent) && guess > r) {
         // Our guess is sensible, so use it.
         r = guess;
+    }
+
+    // Try to reduce oscillation based on guesses.
+    struct Node_Link* bp = Node_getBestParent(link->child);
+    if (bp && bp != link) {
+        uint32_t bpGuess = guessReachOfChild(bp);
+        if (r > bpGuess) { r = bpGuess; }
     }
 
     Assert_true(r < Node_getReach(link->parent) && r != 0);
@@ -532,7 +543,7 @@ static void handleBadNewsTwo(struct Node_Link* link, struct NodeStore_pvt* store
     struct Node_Link* rp = link->child->reversePeers;
     struct Node_Link* best = Node_getBestParent(node);
     while (rp) {
-        if (rp->linkState && Node_getReach(rp->parent) >= Node_getReach(best->parent)) {
+        if (Node_getReach(rp->parent) >= Node_getReach(best->parent)) {
             if (Node_getReach(rp->parent) > Node_getReach(best->parent)
                 || rp->parent->address.path < best->parent->address.path)
             {
@@ -764,6 +775,7 @@ static struct Node_Link* linkNodes(struct Node_Two* parent,
     link->parent = parent;
     link->discoveredPath = discoveredPath;
     link->linkState = 0;
+    link->timeLastSeen = Time_currentTimeMilliseconds(store->eventBase);
     Identity_set(link);
 
     // reverse link
@@ -1211,6 +1223,7 @@ struct NodeList* NodeStore_getNodesForBucket(struct NodeStore* nodeStore,
     nodeList->size = 0;
     struct Node_Two* nn = NULL;
     RB_FOREACH(nn, NodeRBTree, &store->nodeTree) {
+        if (!Node_getReach(nn)) { continue; }
         if (NodeStore_bucketForAddr(store->pub.selfAddress, &nn->address) == bucket) {
             struct Node_Two* newNode = nn;
             struct Node_Two* tempNode = NULL;
@@ -1357,7 +1370,7 @@ static void destroyNode(struct Node_Two* node, struct NodeStore_pvt* store)
         link = nextLink;
     }
 
-    Assert_ifParanoid(!Node_getBestParent(node));
+    Assert_true(!Node_getBestParent(node));
 
     Assert_ifParanoid(node == RB_FIND(NodeRBTree, &store->nodeTree, node));
     RB_REMOVE(NodeRBTree, &store->nodeTree, node);
@@ -1375,13 +1388,12 @@ static uint32_t reachAfterDecay(const uint32_t oldReach)
 {
     // Reduce the reach by 1/Xth where X = NodeStore_latencyWindow
     // This is used to keep a weighted rolling average
-    return (oldReach - (oldReach / NodeStore_latencyWindow));
+    return (uint64_t)oldReach * (NodeStore_latencyWindow - 1) / (NodeStore_latencyWindow);
 }
 
 static uint32_t reachAfterTimeout(const uint32_t oldReach)
 {
-    // TODO(arceliar) just use reachAfterDecay?... would be less penalty for timeouts...
-    return (oldReach / 2);
+    return reachAfterDecay(oldReach);
 }
 
 static uint32_t calcNextReach(const uint32_t oldReach, const uint32_t millisecondsLag)
@@ -1421,6 +1433,10 @@ struct Node_Link* NodeStore_discoverNode(struct NodeStore* nodeStore,
         Log_debug(store->logger, "Discover node [%s]", printedAddr);
     }
 
+    if (child && child == store->selfLink->child) {
+        return NULL;
+    }
+
     if (child && EncodingScheme_compare(child->encodingScheme, scheme)) {
         // Shit.
         // Box reset *and* they just updated and changed their encoding scheme.
@@ -1446,6 +1462,7 @@ struct Node_Link* NodeStore_discoverNode(struct NodeStore* nodeStore,
         child->alloc = alloc;
         Bits_memcpyConst(&child->address, addr, sizeof(struct Address));
         child->encodingScheme = EncodingScheme_clone(scheme, child->alloc);
+        child->timeLastPinged = Time_currentTimeMilliseconds(store->eventBase);
         Identity_set(child);
     }
 
@@ -1498,6 +1515,10 @@ struct Node_Link* NodeStore_discoverNode(struct NodeStore* nodeStore,
         updateBestParent(link, reach, store);
     }
 
+    #ifdef PARANOIA
+        struct Node_Two* parent = link->parent;
+    #endif
+
     handleNews(link->child, reach, store);
     freePendingLinks(store);
 
@@ -1514,11 +1535,18 @@ struct Node_Link* NodeStore_discoverNode(struct NodeStore* nodeStore,
 
         Assert_true(!isPeer(worst, store));
 
+        if (link && (worst == link->parent || worst == link->child)) { link = NULL; }
+
         destroyNode(worst, store);
         freePendingLinks(store);
     }
 
     verify(store);
+
+    // This should test that link == NodeStore_linkForPath(path) but that is not guaranteed
+    // to work because links are not healed up when a node is removed from the store
+    Assert_ifParanoid(!link || RB_FIND(PeerRBTree, &parent->peerTree, link) == link);
+
     return link;
 }
 
@@ -1686,6 +1714,7 @@ struct Node_Link* NodeStore_nextLink(struct Node_Two* parent, struct Node_Link* 
 /** See: NodeStore.h */
 struct NodeStore* NodeStore_new(struct Address* myAddress,
                                 struct Allocator* allocator,
+                                struct EventBase* eventBase,
                                 struct Log* logger,
                                 struct RumorMill* renumberMill)
 {
@@ -1698,6 +1727,7 @@ struct NodeStore* NodeStore_new(struct Address* myAddress,
         },
         .renumberMill = renumberMill,
         .logger = logger,
+        .eventBase = eventBase,
         .alloc = alloc
     }));
     Identity_set(out);
@@ -1712,6 +1742,7 @@ struct NodeStore* NodeStore_new(struct Address* myAddress,
     out->pub.selfNode = selfNode;
     struct Node_Link* selfLink = linkNodes(selfNode, selfNode, 1, 0xffffffffu, 0, 1, out);
     Node_setParentReachAndPath(selfNode, selfLink, UINT32_MAX, 1);
+    selfNode->timeLastPinged = Time_currentTimeMilliseconds(out->eventBase);
     out->selfLink = selfLink;
     RB_INSERT(NodeRBTree, &out->nodeTree, selfNode);
 
@@ -1798,6 +1829,10 @@ struct Node_Two* NodeStore_getBest(struct NodeStore* nodeStore, uint8_t targetAd
     struct Node_Two* n = NodeStore_nodeForAddr(nodeStore, targetAddress);
     if (n && Node_getBestParent(n)) { return n; }
 
+    /**
+     * The network is small enough that a per-bucket lookup is inefficient
+     * Basically, the first bucket is likely to route through an "edge" node
+     * In theory, it scales better if the network is large.
     // Next try to find the best node in the correct bucket
     struct Address fakeAddr;
     Bits_memcpyConst(fakeAddr.ip6.bytes, targetAddress, 16);
@@ -1815,6 +1850,7 @@ struct Node_Two* NodeStore_getBest(struct NodeStore* nodeStore, uint8_t targetAd
     }
     Allocator_free(nodeListAlloc);
     if (n && Node_getBestParent(n)) { return n; }
+    */
 
     // Finally try to find the best node that is a valid next hop (closer in keyspace)
     for (int i = 0; i < 10000; i++) {
@@ -2036,6 +2072,7 @@ static void updatePathReach(struct NodeStore_pvt* store, const uint64_t path, ui
 {
     struct Node_Link* link = store->selfLink;
     uint64_t pathFrag = path;
+    uint64_t now = Time_currentTimeMilliseconds(store->eventBase);
     for (;;) {
         struct Node_Link* nextLink = NULL;
         uint64_t nextPath = firstHopInPath(pathFrag, &nextLink, link, store);
@@ -2045,6 +2082,22 @@ static void updatePathReach(struct NodeStore_pvt* store, const uint64_t path, ui
 
         // expecting behavior of nextLinkOnPath()
         Assert_ifParanoid(nextLink->parent == link->child);
+
+        if (Node_getBestParent(nextLink->child) != nextLink) {
+            // If nextLink->child->bestParent is worse than nextLink, we should replace it.
+            uint64_t newPath = extendRoute(nextLink->parent->address.path,
+                                           nextLink->parent->encodingScheme,
+                                           nextLink->cannonicalLabel,
+                                           link->inverseLinkEncodingFormNumber);
+            if (newPath != extendRoute_INVALID &&
+                Node_getReach(nextLink->child) < newReach &&
+                Node_getReach(nextLink->parent) > newReach &&
+                Node_getReach(nextLink->child) < guessReachOfChild(nextLink))
+            {
+                // This path apparently gives us a better route than our current bestParent.
+                updateBestParent(nextLink, newReach, store);
+            }
+        }
 
         if (Node_getBestParent(nextLink->child) == nextLink) {
             // This is a performance hack, if nextLink->child->bestParent->parent is this node
@@ -2067,7 +2120,12 @@ static void updatePathReach(struct NodeStore_pvt* store, const uint64_t path, ui
                                    ? (guessedLinkState - link->linkState)
                                    : 1;
             update(link, linkStateDiff, store);
+        } else {
+            // Well we at least know it's not dead.
+            update(link, 1, store);
         }
+
+        nextLink->timeLastSeen = now;
 
         pathFrag = nextPath;
         link = nextLink;
@@ -2083,6 +2141,7 @@ static void updatePathReach(struct NodeStore_pvt* store, const uint64_t path, ui
         uint32_t newLinkState = subReach(Node_getReach(link->parent), newReach);
         update(link, newLinkState - link->linkState, store);
     }
+    link->child->timeLastPinged = Time_currentTimeMilliseconds(store->eventBase);
 }
 
 void NodeStore_pathResponse(struct NodeStore* nodeStore, uint64_t path, uint64_t milliseconds)
@@ -2093,7 +2152,7 @@ void NodeStore_pathResponse(struct NodeStore* nodeStore, uint64_t path, uint64_t
     struct Node_Two* node = link->child;
     uint32_t newReach;
     if (node->address.path == path) {
-        // Use old reach value to calculate new reach
+        // Use old reach value to calculate new reach.
         newReach = calcNextReach(Node_getReach(node), milliseconds);
     }
     else {
@@ -2125,7 +2184,7 @@ void NodeStore_pathTimeout(struct NodeStore* nodeStore, uint64_t path)
             // TODO(arceliar): Something sane. We don't know which link on the path is bad.
             // For now, just penalize them all.
             // The good ones will be rewarded again when they relay another ping.
-            update(link, -link->linkState/2, store);
+            update(link, reachAfterTimeout(link->linkState)-link->linkState, store);
         }
 
         pathFrag = nextPath;
@@ -2136,6 +2195,21 @@ void NodeStore_pathTimeout(struct NodeStore* nodeStore, uint64_t path)
     if (!link || link->child->address.path != path) { return; }
     struct Node_Two* node = link->child;
     uint32_t newReach = reachAfterTimeout(Node_getReach(node));
+    if (!newReach) {
+        // The node hasn't responded in a really long time.
+        // Possible causes:
+        // 1) The node is offline, and for some reason we're not getting an error packet back.
+        // 2) The node is behind a node that's offline, and for some reason we're not getting error.
+        // 3) The node is online, but in a bad state, where it cannot respond to pings.
+        //    (E.g. Our CA session broke and it refuses to reset, known bug in old versions.)
+        // If we don't do something, we'll guessReachOfChild to re-discover a path through the link.
+        // Doing that can get the node store stuck in a bad state where this node is blackholed.
+        // As a workaround, break the link. That prevents re-discovering the same broken path.
+        // If 2), we might accidentally break a valid link, but we should re-discover it the
+        // next time we successfully contact link->child (via another path).
+        brokenLink(store, link);
+        return;
+    }
     if (Defined(Log_DEBUG)) {
         uint8_t addr[60];
         Address_print(addr, &node->address);
@@ -2146,18 +2220,25 @@ void NodeStore_pathTimeout(struct NodeStore* nodeStore, uint64_t path)
                   newReach);
     }
     handleNews(node, newReach, store);
-    if (newReach > 1024) {
-        // Keep checking until we're sure it's either OK or down.
-        RumorMill_addNode(store->renumberMill, &node->address);
-    }
 
-    /* This workaround can lock the rumorMill in a bad state.
+    if (node->address.path != path) { return; }
+
+    // TODO(cjd): What we really should be doing here is storing this link in a
+    //            potentially-down-list, after pinging the parent, if the parent does not respond
+    //            and then we replace the link with the parent's link and walk backwards up
+    //            the tree. If the parent does respond then we keep pinging the child of the path
+    //            hoping it will respond or die and as it's link-state is destroyed by subsequent
+    //            lost packets, children will be re-parented to other paths.
+
+    // Keep checking until we're sure it's either OK or down.
+    RumorMill_addNode(store->renumberMill, &node->address);
+
     if (link->parent != store->pub.selfNode) {
         // All we know for sure is that link->child didn't respond.
         // That could be because an earlier link is down.
         // Same idea as the workaround in NodeStore_brokenPath();
         RumorMill_addNode(store->renumberMill, &link->parent->address);
-    }*/
+    }
 }
 
 /* Find the address that describes the source's Nth (furthest-away) bucket. */
@@ -2211,4 +2292,17 @@ uint16_t NodeStore_bucketForAddr(struct Address* source, struct Address* dest)
     retVal += 0x0F - prefix;
 
     return retVal;
+}
+
+uint64_t NodeStore_timeSinceLastPing(struct NodeStore* nodeStore, struct Node_Two* node)
+{
+    struct NodeStore_pvt* store = Identity_check((struct NodeStore_pvt*)nodeStore);
+    uint64_t now = Time_currentTimeMilliseconds(store->eventBase);
+    uint64_t lastSeen = node->timeLastPinged;
+    struct Node_Link* link = Node_getBestParent(node);
+    while (link && link != store->selfLink) {
+        lastSeen = (link->timeLastSeen < lastSeen) ? link->timeLastSeen : lastSeen;
+        link = Node_getBestParent(link->parent);
+    }
+    return now - lastSeen;
 }

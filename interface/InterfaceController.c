@@ -223,7 +223,7 @@ static void pingCallback(void* vic)
 
     // scan for endpoints have not sent anything recently.
     uint32_t startAt = Random_uint32(ic->rand) % ic->peerMap.count;
-    for (uint32_t i = startAt, count = 0; (!count || i != startAt) && count <= ic->peerMap.count;) {
+    for (uint32_t i = startAt, count = 0; count < ic->peerMap.count;) {
         i = (i + 1) % ic->peerMap.count;
         count++;
 
@@ -442,7 +442,11 @@ int InterfaceController_registerPeer(struct InterfaceController* ifController,
     struct InterfaceController_pvt* ic =
         Identity_check((struct InterfaceController_pvt*) ifController);
 
-    if (Map_OfIFCPeerByExernalIf_indexForKey(&externalInterface, &ic->peerMap) > -1) {
+    int epIndex = Map_OfIFCPeerByExernalIf_indexForKey(&externalInterface, &ic->peerMap);
+    if (epIndex > -1) {
+        // The password might have changed!
+        struct InterfaceController_Peer* ep = ic->peerMap.values[epIndex];
+        CryptoAuth_setAuth(password, 1, ep->cryptoAuthIf);
         return 0;
     }
 

@@ -60,6 +60,11 @@ static void dumpTable(Dict* args, void* vcontext, String* txid, struct Allocator
         Dict_putInt(nodeDict, String_CONST("link"), Node_getReach(nn), requestAlloc);
         Dict_putInt(nodeDict, String_CONST("version"), nn->address.protocolVersion, requestAlloc);
 
+        Dict_putInt(nodeDict,
+                    String_CONST("time"),
+                    NodeStore_timeSinceLastPing(ctx->store, nn),
+                    requestAlloc);
+
         List_addDict(table, nodeDict, requestAlloc);
     }
     Dict_putList(out, String_CONST("routingTable"), table, requestAlloc);

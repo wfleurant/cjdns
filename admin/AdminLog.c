@@ -211,7 +211,10 @@ static void doLog(struct Log* genericLog,
                                      args,
                                      logLineAlloc);
         }
-        if (Admin_sendMessage(message, log->subscriptions[i].txid, log->admin)) {
+        int ret = Admin_sendMessage(message, log->subscriptions[i].txid, log->admin);
+        if (ret == Admin_sendMessage_CHANNEL_CLOSED) {
+            removeSubscription(log, &log->subscriptions[i]);
+        } else if (ret) {
             log->subscriptions[i].dropped++;
             if (!log->unpause) {
                 log->unpause = Timeout_setInterval(unpause, log, 10, log->base, log->alloc);
@@ -232,7 +235,7 @@ static void subscribe(Dict* args, void* vcontext, String* txid, struct Allocator
     enum Log_Level level = (levelName) ? Log_levelForName(levelName->bytes) : Log_Level_DEBUG;
     int64_t* lineNumPtr = Dict_getInt(args, String_CONST("line"));
     String* fileStr = Dict_getString(args, String_CONST("file"));
-    if (!fileStr->len) { fileStr = NULL; }
+    if (fileStr && !fileStr->len) { fileStr = NULL; }
     char* error = "2+2=5";
     if (level == Log_Level_INVALID) {
         level = Log_Level_KEYS;
