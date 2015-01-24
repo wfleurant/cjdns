@@ -86,7 +86,7 @@ static int genAddress(uint8_t addressOut[40],
     }
 }
 
-static int genconf(struct Random* rand)
+static int genconf(struct Random* rand, bool eth)
 {
     uint8_t password[32];
     uint8_t password2[32];
@@ -184,13 +184,18 @@ static int genconf(struct Random* rand)
            "            }\n"
            "        ]\n");
 #ifdef HAS_ETH_INTERFACE
-    printf("\n"
-           "        /*\n"
-           "        \"ETHInterface\":\n"
+    printf("\n");
+    if (!eth) {
+        printf("        /*\n");
+    }
+    printf("        \"ETHInterface\":\n"
            "        [\n"
+           "            // Alternatively bind to just one device and either beacon and/or\n"
+           "            // connect to a specified MAC address\n"
            "            {\n"
-           "                // Bind to this device (interface name, not MAC etc.)\n"
-           "                \"bind\": \"eth0\",\n"
+           "                // Bind to this device (interface name, not MAC)\n"
+           "                // \"all\" is a pseudo-name which will try to connect to all devices.\n"
+           "                \"bind\": \"all\",\n"
            "\n"
            "                // Auto-connect to other cjdns nodes on the same network.\n"
            "                // Options:\n"
@@ -208,7 +213,8 @@ static int genconf(struct Random* rand)
            "                //\n"
            "                \"beacon\": 2,\n"
            "\n"
-           "                // Node(s) to connect to manually.\n"
+           "                // Node(s) to connect to manually\n"
+           "                // Note: does not work with \"all\" pseudo-device-name\n"
            "                \"connectTo\":\n"
            "                {\n"
            "                    // Credentials for connecting look similar to UDP credientials\n"
@@ -216,9 +222,11 @@ static int genconf(struct Random* rand)
            "                    // \"01:02:03:04:05:06\":{\"password\":\"a\",\"publicKey\":\"b\"}\n"
            "                }\n"
            "            }\n"
-           "        ]\n"
-           "        */\n"
-           "\n");
+           "        ]\n");
+    if (!eth) {
+        printf("        */\n");
+    }
+    printf("\n");
 #endif
     printf("    },\n"
            "\n"
@@ -278,10 +286,6 @@ static int genconf(struct Random* rand)
            "        }\n"
            "    },\n"
            "\n"
-           "    // Tear down inactive CryptoAuth sessions after this number of seconds\n"
-           "    // to make them more forgiving in the event that they become desynchronized.\n"
-           "    \"resetAfterInactivitySeconds\": 100,\n"
-           "\n"
            "    // Dropping permissions.\n"
            "    \"security\":\n"
            "    [\n"
@@ -305,30 +309,6 @@ static int genconf(struct Random* rand)
            "    // If set to non-zero, cjdns will not fork to the background.\n"
            "    // Recommended for use in conjunction with \"logTo\":\"stdout\".\n"
            "    \"noBackground\":0,\n"
-           "\n");
-    printf("    // DNS, this server will be available at address fc00::1\n"
-           "    \"dns\":\n"
-           "    {\n"
-           "        // Who to trust\n"
-           "        \"keys\": [\n"
-           "            \"7kuc3jcyql3cm8lx5zdj8vc0tkz8679kyx83utbm1ub5bxpf4mf1.mittens.h\",\n"
-           "            \"tvlxu5rbcj76rfdmsw9xd3kjn79fhv6kpvl2hzv98637j4rdj1b1.tom.h\",\n"
-           "            \"kkxfwnm3upf0jv35jq4lx0dn0z3m9bh71gv84cdjlcp68w1qckt1.maru.h\",\n"
-           "            \"02wmqfu7v0kdq17fwv68hk646bdvhcr8ybk2ycy7ddzv21n5nb60.scruffy.h\"\n"
-           "        ],\n"
-           "\n"
-           "        // Who to ask, if a request fails the next one will be tried\n"
-           "        \"servers\": [\n"
-           "            \"[fc71:ec46:57a0:2bbc:537d:b680:3630:93e4]:9001\",\n"
-           "            \"[fc8e:9a1c:27c3:281b:29b1:1a04:3701:c125]:9001\",\n"
-           "            \"[fcad:0450:4a40:9778:14e2:e442:6678:3161]:9001\",\n"
-           "            \"[fc2f:baa8:4a89:2db5:6789:aa75:07e6:4cb2]:9001\"\n"
-           "        ],\n"
-           "\n"
-           "        // At least this many of \"keys\" must agree or else the request will fail.\n"
-           "        \"minSignatures\":2\n"
-           "    }\n"
-           "\n"
            "}\n");
 
     return 0;
@@ -453,12 +433,18 @@ int main(int argc, char** argv)
     struct Random* rand = Random_new(allocator, NULL, eh);
     struct EventBase* eventBase = EventBase_new(allocator);
 
-    if (argc == 2) {
+    if (argc >= 2) {
         // one argument
         if ((CString_strcmp(argv[1], "--help") == 0) || (CString_strcmp(argv[1], "-h") == 0)) {
             return usage(allocator, argv[0]);
         } else if (CString_strcmp(argv[1], "--genconf") == 0) {
-            return genconf(rand);
+            bool eth = 0;
+            for (int i = 1; i < argc; i++) {
+                if (!CString_strcmp(argv[i], "--eth")) {
+                    eth = 1;
+                }
+            }
+            return genconf(rand, eth);
         } else if (CString_strcmp(argv[1], "--pidfile") == 0) {
             // deprecated
             fprintf(stderr, "'--pidfile' option is deprecated.\n");

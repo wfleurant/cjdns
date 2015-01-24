@@ -15,6 +15,7 @@
 #ifndef ETHInterface_H
 #define ETHInterface_H
 
+#include "benc/List.h"
 #include "util/events/EventBase.h"
 #include "interface/Interface.h"
 #include "interface/InterfaceController.h"
@@ -43,7 +44,16 @@ struct ETHInterface_Header
 #define ETHInterface_Header_SIZE 6
 Assert_compileTime(sizeof(struct ETHInterface_Header) == ETHInterface_Header_SIZE);
 
-struct ETHInterface;
+/** The content of a Sockaddr emitted from ETHInterface. */
+struct ETHInterface_Sockaddr
+{
+    struct Sockaddr generic;
+    uint8_t mac[6];
+    uint8_t version;
+    uint8_t zero;
+};
+#define ETHInterface_Sockaddr_SIZE 16
+Assert_compileTime(sizeof(struct ETHInterface_Sockaddr) == ETHInterface_Sockaddr_SIZE);
 
 /**
  * @param base the LibEvent context.
@@ -55,48 +65,12 @@ struct ETHInterface;
  *           and use when starting connections.
  * @return a new ETHInterface.
  */
-struct ETHInterface* ETHInterface_new(struct EventBase* base,
-                                      const char* bindDevice,
-                                      struct Allocator* allocator,
-                                      struct Except* exHandler,
-                                      struct Log* logger,
-                                      struct InterfaceController* ic);
+struct Interface* ETHInterface_new(struct EventBase* eventBase,
+                                   const char* bindDevice,
+                                   struct Allocator* alloc,
+                                   struct Except* exHandler,
+                                   struct Log* logger);
 
-
-/**
- * Begin an outgoing connection.
- *
- * @param macAddress the MAC address of the ethernet card to connect to.
- * @param cryptoKey the node's public key, this is required to send it traffic.
- * @param password if specified, the password for authenticating with the other node.
- * @param ethIf the Ether interface.
- * @return 0 on success
- *     ETHInterface_beginConnection_OUT_OF_SPACE if there is no space to store the entry.
- *     ETHInterface_beginConnection_BAD_KEY invalid (non-cjdns) cryptoKey
- *     ETHInterface_beginConnection_BAD_IFACE failed to parse interface name.
- *     ETHInterface_beginConnection_UNKNOWN_ERROR something failed in InterfaceController.
- *     ETHInterface_beginConnection_BAD_MAC malformed MAC address.
- */
-#define ETHInterface_beginConnection_OUT_OF_SPACE -1
-#define ETHInterface_beginConnection_BAD_KEY -2
-#define ETHInterface_beginConnection_BAD_IFACE -3
-#define ETHInterface_beginConnection_UNKNOWN_ERROR -4
-#define ETHInterface_beginConnection_BAD_MAC -5
-int ETHInterface_beginConnection(const char* macAddress,
-                                 uint8_t cryptoKey[32],
-                                 String* password,
-                                 struct ETHInterface* ethIf);
-
-/**
- * Get or set the beaconing state of the ethernet interface.
- *
- * @param ethIf the ethernet iface.
- * @param state if not NULL, the state will be set to this, if NULL then nothing will be changed.
- * @return the current state after (possibly) setting.
- */
-#define ETHInterface_beacon_DISABLED 0
-#define ETHInterface_beacon_ACCEPTING 1
-#define ETHInterface_beacon_ACCEPTING_AND_SENDING 2
-int ETHInterface_beacon(struct ETHInterface* ethIf, int* state);
+List* ETHInterface_listDevices(struct Allocator* alloc, struct Except* eh);
 
 #endif

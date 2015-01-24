@@ -41,6 +41,8 @@ struct TestFramework_Link
     struct Interface destIf;
     struct TestFramework* src;
     struct TestFramework* dest;
+    int serverIfNum;
+    int clientIfNum;
     Identity
 };
 
@@ -187,7 +189,9 @@ void TestFramework_assertLastMessageUnaltered(struct TestFramework* tf)
     Assert_true(!Bits_memcmp(a->bytes, b->bytes, a->length));
 }
 
-void TestFramework_linkNodes(struct TestFramework* client, struct TestFramework* server)
+void TestFramework_linkNodes(struct TestFramework* client,
+                             struct TestFramework* server,
+                             bool beacon)
 {
     // ifaceA is the client, ifaceB is the server
     struct TestFramework_Link* link =
@@ -209,19 +213,34 @@ void TestFramework_linkNodes(struct TestFramework* client, struct TestFramework*
     }), sizeof(struct TestFramework_Link));
     Identity_set(link);
 
-    // server knows nothing about the client.
-    InterfaceController_registerPeer(server->ifController, NULL, NULL, true, false, &link->destIf);
+    link->clientIfNum = InterfaceController_regIface(
+        client->ifController, &link->srcIf, String_CONST("testA"), client->alloc);
 
-    // Except that it has an authorizedPassword added.
-    CryptoAuth_addUser(String_CONST("abcdefg1234"), 1, String_CONST("TEST"), server->cryptoAuth);
+    link->serverIfNum = InterfaceController_regIface(
+        server->ifController, &link->destIf, String_CONST("testB"), server->alloc);
 
-    // Client has pubKey and passwd for the server.
-    InterfaceController_registerPeer(client->ifController,
-                                     server->publicKey,
-                                     String_CONST("abcdefg1234"),
-                                     false,
-                                     false,
-                                     &link->srcIf);
+    if (beacon) {
+        int ret = InterfaceController_beaconState(client->ifController,
+                                                  link->clientIfNum,
+                                                  InterfaceController_beaconState_newState_ACCEPT);
+        Assert_true(!ret);
+
+        ret = InterfaceController_beaconState(server->ifController,
+                                              link->serverIfNum,
+                                              InterfaceController_beaconState_newState_SEND);
+        Assert_true(!ret);
+    } else {
+        // Except that it has an authorizedPassword added.
+        CryptoAuth_addUser(String_CONST("abcdefg123"), 1, String_CONST("TEST"), server->cryptoAuth);
+
+        // Client has pubKey and passwd for the server.
+        InterfaceController_bootstrapPeer(client->ifController,
+                                          link->clientIfNum,
+                                          server->publicKey,
+                                          Sockaddr_LOOPBACK,
+                                          String_CONST("abcdefg123"),
+                                          client->alloc);
+    }
 }
 
 void TestFramework_craftIPHeader(struct Message* msg, uint8_t srcAddr[16], uint8_t destAddr[16])
