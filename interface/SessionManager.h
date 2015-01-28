@@ -53,6 +53,9 @@ struct SessionManager_Session
 
     /** The IPv6 address of the other node. */
     uint8_t ip6[16];
+
+    /** Some label which is known to go to this node... */
+    uint64_t knownSwitchLabel;
 };
 
 struct SessionManager_HandleList
@@ -76,9 +79,8 @@ struct SessionManager_HandleList
  * @param allocator means of getting memory.
  * @return a session manager.
  */
-
-struct SessionManager* SessionManager_new(Interface_CALLBACK(decryptedIncoming),
-                                          Interface_CALLBACK(encryptedOutgoing),
+struct SessionManager* SessionManager_new(Interface_Callback decryptedIncoming,
+                                          Interface_Callback encryptedOutgoing,
                                           void* interfaceContext,
                                           struct EventBase* eventBase,
                                           struct CryptoAuth* cryptoAuth,

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* -*- Mode:Js */
 /* vim: set expandtab ts=4 sw=4: */
 /*
  * You may redistribute this program and/or modify it under the terms of
@@ -13,7 +14,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-var Cjdns = require('../cjdnsadmin/cjdnsadmin');
+var Cjdns = require('../contrib/nodejs/cjdnsadmin/cjdnsadmin');
 
 Cjdns.connectWithAdminInfo(function (cjdns) {
 
@@ -32,7 +33,7 @@ Cjdns.connectWithAdminInfo(function (cjdns) {
             } else {
                 list.sort(function (a,b) { return a.path < b.path ? -1 : 1; });
                 list.forEach(function (r) {
-                    console.log(r.ip + ' ' + r.path + ' ' + r.link + ' ' + r.version + ' ' + r.time);
+                    console.log(r.addr + ' ' + r.link + ' ' + r.time);
                 });
 
                 console.log(table.count + ' nodes ' + table.peers + ' peers');

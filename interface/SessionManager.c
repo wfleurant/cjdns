@@ -28,7 +28,7 @@
 #include <stdint.h>
 
 /** The number of seconds of inactivity before a session should expire. */
-#define SESSION_TIMEOUT_SECONDS 600
+#define SESSION_TIMEOUT_SECONDS 180
 
 /** The number of seconds between cleanup cycles. */
 #define CLEANUP_CYCLE_SECONDS 20
@@ -67,7 +67,7 @@ struct SessionManager
     /** Trick interface which is used for receiving and sending to the inside/outside world. */
     struct Interface iface;
 
-    Interface_CONST_CALLBACK(encryptedOutgoing);
+    Interface_Callback encryptedOutgoing;
 
     void* const interfaceContext;
 
@@ -247,8 +247,8 @@ struct SessionManager_HandleList* SessionManager_getHandleList(struct SessionMan
     return out;
 }
 
-struct SessionManager* SessionManager_new(Interface_CALLBACK(decryptedIncoming),
-                                          Interface_CALLBACK(encryptedOutgoing),
+struct SessionManager* SessionManager_new(Interface_Callback decryptedIncoming,
+                                          Interface_Callback encryptedOutgoing,
                                           void* interfaceContext,
                                           struct EventBase* eventBase,
                                           struct CryptoAuth* cryptoAuth,

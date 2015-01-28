@@ -14,9 +14,20 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-var Cjdns = require('../cjdnsadmin/cjdnsadmin');
-var nThen = require('../cjdnsadmin/nthen');
+var Cjdns = require('../contrib/nodejs/cjdnsadmin/cjdnsadmin');
+var nThen = require('../contrib/nodejs/cjdnsadmin/nthen');
 var PubToIp6 = require('./lib/publicToIp6');
+var Dns = require('dns');
+
+var IP6_REGEX = new RegExp('^' + new Array(9).join(':[0-9a-f]{1,4}').substring(1) + '$');
+var LABEL_REGEX = new RegExp('^' + new Array(5).join('.[0-9a-f]{4}').substring(1) + '$');
+var ADDR_REGEX = new RegExp('^v[0-9]+' + new Array(5).join('\\.[0-9a-f]{4}') + '\\.[a-z0-9]{52}\\.k$');
+var validTarget = function (target) {
+    if (IP6_REGEX.test(target)) { return true; }
+    if (LABEL_REGEX.test(target)) { return true; }
+    if (ADDR_REGEX.test(target)) { return true; }
+    return false;
+};
 
 var nodeToIP6 = function (nodeDesc) {
     var key = nodeDesc.replace(/.*\.([^.]*\.k)$/, function (all, one) { return one; });
@@ -60,6 +71,14 @@ var main = function (target) {
 
         Cjdns.connectWithAdminInfo(waitFor(function (c) { cjdns = c; }));
 
+        if (!validTarget(target)) {
+            Dns.lookup(target, 6, waitFor(function (err, res) {
+                if (err) { throw err; }
+                console.log(target + ' has ip address ' + res);
+                target = res;
+            }));
+        }
+
     }).nThen(function (waitFor) {
 
         cjdns.RouterModule_getPeers("0000.0000.0000.0001", waitFor(function (err, ret) {
@@ -91,7 +110,7 @@ var main = function (target) {
             if (ret.nodes.length === 0) {
                 console.log('cornered');
             } else if (ret.nodes[0] !== ret.from) {
-                process.stdout.write(ret.nodes[0]);
+                process.stdout.write(ret.nodes[0] + ' ' + highBits(ret.nodes[0]));
             }
         }, waitFor());
 
