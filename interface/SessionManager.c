@@ -88,18 +88,21 @@ struct SessionManager
 static void cleanup(void* vsm)
 {
     struct SessionManager* sm = (struct SessionManager*) vsm;
-    uint64_t now = Time_currentTimeMilliseconds(sm->eventBase);
+    uint64_t cutoffTime =
+        Time_currentTimeMilliseconds(sm->eventBase) - (SESSION_TIMEOUT_SECONDS * 1000);
     for (uint32_t i = 0; i < sm->ifaceMap.count; i++) {
-        uint64_t lastMsg = sm->ifaceMap.values[i]->pub.timeOfLastIn;
-        if (sm->ifaceMap.values[i]->pub.timeOfLastOut > lastMsg) {
-            lastMsg = sm->ifaceMap.values[i]->pub.timeOfLastOut;
-        }
-        if (lastMsg < (now - (SESSION_TIMEOUT_SECONDS * 1000))) {
-            struct Allocator* ifAllocator = sm->ifaceMap.values[i]->pub.external.allocator;
-            Map_OfSessionsByIp6_remove(i, &sm->ifaceMap);
-            Allocator_free(ifAllocator);
-            i--;
-        }
+        struct SessionManager_Session* sess = &sm->ifaceMap.values[i]->pub;
+
+        // Received a message since cutoff time.
+        if (sess->timeOfLastIn > cutoffTime) { continue; }
+
+        // Received a message (ever) or session is not older than cutoff time.
+        if (sess->timeOfLastIn || sess->timeOfCreation > cutoffTime) { continue; }
+
+        struct Allocator* ifAllocator = sess->external.allocator;
+        Map_OfSessionsByIp6_remove(i, &sm->ifaceMap);
+        Allocator_free(ifAllocator);
+        i--;
     }
 }
 
@@ -166,9 +169,6 @@ struct SessionManager_Session* SessionManager_getSession(uint8_t* lookupKey,
 {
     int ifaceIndex = Map_OfSessionsByIp6_indexForKey((struct Ip6*)lookupKey, &sm->ifaceMap);
     if (ifaceIndex == -1) {
-        // Make sure cleanup() doesn't get behind.
-        cleanup(sm);
-
         struct Allocator* ifAlloc = Allocator_child(sm->allocator);
         struct SessionManager_Session_pvt* ss =
             Allocator_clone(ifAlloc, (&(struct SessionManager_Session_pvt) {
@@ -182,6 +182,8 @@ struct SessionManager_Session* SessionManager_getSession(uint8_t* lookupKey,
                 .sm = sm
             }));
         Identity_set(ss);
+
+        ss->pub.timeOfCreation = Time_currentTimeMilliseconds(sm->eventBase);
 
         // const hack
         Bits_memcpyConst((void*)&ss->pub.external.senderContext, &ss, sizeof(char*));
