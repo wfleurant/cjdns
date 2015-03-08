@@ -13,14 +13,14 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include "interface/ETHInterface_admin.h"
+#include "interface/ETHInterface.h"
 #include "admin/angel/Hermes.h"
 #include "benc/Int.h"
 #include "admin/Admin.h"
 #include "crypto/Key.h"
 #include "exception/Jmp.h"
-#include "interface/ETHInterface.h"
 #include "memory/Allocator.h"
-#include "interface/InterfaceController.h"
+#include "net/InterfaceController.h"
 #include "util/AddrTools.h"
 #include "util/Identity.h"
 
@@ -87,7 +87,7 @@ static void newInterface(Dict* args, void* vcontext, String* txid, struct Alloca
     String* const bindDevice = Dict_getString(args, String_CONST("bindDevice"));
     struct Allocator* const alloc = Allocator_child(ctx->alloc);
 
-    struct Interface* ethIf = NULL;
+    struct ETHInterface* ethIf = NULL;
     struct Jmp jmp;
     Jmp_try(jmp) {
         ethIf = ETHInterface_new(
@@ -102,11 +102,12 @@ static void newInterface(Dict* args, void* vcontext, String* txid, struct Alloca
 
     String* ifname = String_printf(requestAlloc, "ETH/%s", bindDevice->bytes);
 
-    int ifNum = InterfaceController_regIface(ctx->ic, ethIf, ifname, alloc);
+    struct InterfaceController_Iface* ici = InterfaceController_newIface(ctx->ic, ifname, alloc);
+    Iface_plumb(&ici->addrIf, &ethIf->generic.iface);
 
     Dict* out = Dict_new(requestAlloc);
     Dict_putString(out, String_CONST("error"), String_CONST("none"), requestAlloc);
-    Dict_putInt(out, String_CONST("interfaceNumber"), ifNum, requestAlloc);
+    Dict_putInt(out, String_CONST("interfaceNumber"), ici->ifNum, requestAlloc);
 
     Admin_sendMessage(out, txid, ctx->admin);
 }

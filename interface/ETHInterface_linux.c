@@ -12,11 +12,10 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#include "exception/Except.h"
-#include "interface/Interface.h"
 #include "interface/ETHInterface.h"
+#include "exception/Except.h"
 #include "memory/Allocator.h"
-#include "interface/InterfaceController.h"
+#include "net/InterfaceController.h"
 #include "wire/Headers.h"
 #include "wire/Message.h"
 #include "wire/Error.h"
@@ -48,9 +47,9 @@
 // 2 last 0x00 of .sll_addr are removed from original size (20)
 #define SOCKADDR_LL_LEN 18
 
-struct ETHInterface
+struct ETHInterface_pvt
 {
-    struct Interface generic;
+    struct ETHInterface pub;
 
     Socket socket;
 
@@ -66,9 +65,9 @@ struct ETHInterface
     Identity
 };
 
-static uint8_t sendMessageInternal(struct Message* message,
-                                   struct sockaddr_ll* addr,
-                                   struct ETHInterface* context)
+static void sendMessageInternal(struct Message* message,
+                                struct sockaddr_ll* addr,
+                                struct ETHInterface_pvt* context)
 {
     /* Cut down on the noise
     uint8_t buff[sizeof(*addr) * 2 + 1] = {0};
@@ -84,24 +83,23 @@ static uint8_t sendMessageInternal(struct Message* message,
                sizeof(struct sockaddr_ll)) < 0)
     {
         switch (errno) {
-            case EMSGSIZE:
-                return Error_OVERSIZE_MESSAGE;
-
-            case ENOBUFS:
-            case EAGAIN:
-                return Error_LINK_LIMIT_EXCEEDED;
-
             default:;
                 Log_info(context->logger, "[%s] Got error sending to socket [%s]",
                          context->ifName->bytes, strerror(errno));
+
+            case EMSGSIZE:
+            case ENOBUFS:
+            case EAGAIN:;
+                // todo: care
         }
     }
-    return 0;
+    return;
 }
 
-static uint8_t sendMessage(struct Message* msg, struct Interface* ethIf)
+static Iface_DEFUN sendMessage(struct Message* msg, struct Iface* iface)
 {
-    struct ETHInterface* ctx = Identity_check((struct ETHInterface*) ethIf);
+    struct ETHInterface_pvt* ctx =
+        Identity_containerOf(iface, struct ETHInterface_pvt, pub.generic.iface);
 
     struct Sockaddr* sa = (struct Sockaddr*) msg->bytes;
     Assert_true(msg->length >= Sockaddr_OVERHEAD);
@@ -126,10 +124,11 @@ static uint8_t sendMessage(struct Message* msg, struct Interface* ethIf)
         .fc00_be = Endian_hostToBigEndian16(0xfc00)
     };
     Message_push(msg, &hdr, ETHInterface_Header_SIZE, NULL);
-    return sendMessageInternal(msg, &addr, ctx);
+    sendMessageInternal(msg, &addr, ctx);
+    return NULL;
 }
 
-static void handleEvent2(struct ETHInterface* context, struct Allocator* messageAlloc)
+static void handleEvent2(struct ETHInterface_pvt* context, struct Allocator* messageAlloc)
 {
     struct Message* msg = Message_new(MAX_PACKET_SIZE, PADDING, messageAlloc);
 
@@ -180,7 +179,7 @@ static void handleEvent2(struct ETHInterface* context, struct Allocator* message
         return;
     }
 
-    struct ETHInterface_Sockaddr sockaddr = { .zero = 0 };
+    struct ETHInterface_Sockaddr  sockaddr = { .zero = 0 };
     Bits_memcpyConst(sockaddr.mac, addr.sll_addr, 6);
     sockaddr.generic.addrLen = ETHInterface_Sockaddr_SIZE;
     if (addr.sll_pkttype == PACKET_BROADCAST) {
@@ -191,13 +190,13 @@ static void handleEvent2(struct ETHInterface* context, struct Allocator* message
 
     Assert_true(!((uintptr_t)msg->bytes % 4) && "Alignment fault");
 
-    Interface_receiveMessage(&context->generic, msg);
+    Iface_send(&context->pub.generic.iface, msg);
 }
 
 static void handleEvent(void* vcontext)
 {
-    struct ETHInterface* context = Identity_check((struct ETHInterface*) vcontext);
-    struct Allocator* messageAlloc = Allocator_child(context->generic.allocator);
+    struct ETHInterface_pvt* context = Identity_check((struct ETHInterface_pvt*) vcontext);
+    struct Allocator* messageAlloc = Allocator_child(context->pub.generic.alloc);
     handleEvent2(context, messageAlloc);
     Allocator_free(messageAlloc);
 }
@@ -220,26 +219,22 @@ List* ETHInterface_listDevices(struct Allocator* alloc, struct Except* eh)
 
 static int closeSocket(struct Allocator_OnFreeJob* j)
 {
-    struct ETHInterface* ctx = Identity_check((struct ETHInterface*) j->userData);
+    struct ETHInterface_pvt* ctx = Identity_check((struct ETHInterface_pvt*) j->userData);
     close(ctx->socket);
     return 0;
 }
 
-struct Interface* ETHInterface_new(struct EventBase* eventBase,
-                                   const char* bindDevice,
-                                   struct Allocator* alloc,
-                                   struct Except* exHandler,
-                                   struct Log* logger)
+struct ETHInterface* ETHInterface_new(struct EventBase* eventBase,
+                                      const char* bindDevice,
+                                      struct Allocator* alloc,
+                                      struct Except* exHandler,
+                                      struct Log* logger)
 {
-    struct ETHInterface* ctx =
-        Allocator_clone(alloc, (&(struct ETHInterface) {
-            .generic = {
-                .sendMessage = sendMessage,
-                .allocator = alloc
-            },
-            .logger = logger
-        }));
+    struct ETHInterface_pvt* ctx = Allocator_calloc(alloc, sizeof(struct ETHInterface_pvt), 1);
     Identity_set(ctx);
+    ctx->pub.generic.iface.send = sendMessage;
+    ctx->pub.generic.alloc = alloc;
+    ctx->logger = logger;
 
     struct ifreq ifr = { .ifr_ifindex = 0 };
 
@@ -285,5 +280,5 @@ struct Interface* ETHInterface_new(struct EventBase* eventBase,
 
     Event_socketRead(handleEvent, ctx, ctx->socket, eventBase, alloc, exHandler);
 
-    return &ctx->generic;
+    return &ctx->pub;
 }

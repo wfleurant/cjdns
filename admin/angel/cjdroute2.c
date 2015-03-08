@@ -12,50 +12,43 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#include "admin/Admin.h"
 #include "admin/AdminClient.h"
-#include "admin/angel/InterfaceWaiter.h"
 #include "admin/angel/AngelInit.h"
 #include "admin/angel/Core.h"
-#include "admin/AuthorizedPasswords.h"
+#include "admin/angel/InterfaceWaiter.h"
 #include "admin/Configurator.h"
+#include "benc/Dict.h"
 #include "benc/Int.h"
-#include "crypto/AddressCalc.h"
-#include "crypto/CryptoAuth.h"
-#include "crypto/CryptoAuth_benchmark.h"
-#include "dht/ReplyModule.h"
-#include "dht/SerializationModule.h"
-#include "dht/dhtcore/RouterModule_admin.h"
-#include "exception/Except.h"
-#include "interface/Interface.h"
-#include "interface/UDPInterface_admin.h"
-#include "io/Reader.h"
-#include "io/FileReader.h"
-#include "io/Writer.h"
-#include "io/FileWriter.h"
+#include "benc/List.h"
 #include "benc/serialization/BencSerializer.h"
 #include "benc/serialization/json/JsonBencSerializer.h"
 #include "benc/serialization/standard/BencMessageReader.h"
 #include "benc/serialization/standard/BencMessageWriter.h"
-#include "util/log/Log.h"
-#include "memory/MallocAllocator.h"
+#include "crypto/AddressCalc.h"
+#include "crypto/CryptoAuth.h"
+#include "dht/Address.h"
+#include "exception/Except.h"
+#include "interface/Iface.h"
+#include "io/FileReader.h"
+#include "io/FileWriter.h"
+#include "io/Reader.h"
+#include "io/Writer.h"
 #include "memory/Allocator.h"
-#include "net/Ducttape.h"
-#include "net/SwitchPinger.h"
-#include "net/SwitchPinger_admin.h"
-#include "switch/SwitchCore.h"
-#include "util/CString.h"
+#include "memory/MallocAllocator.h"
 #include "util/ArchInfo.h"
-#include "util/SysInfo.h"
+#include "util/Assert.h"
+#include "util/Base32.h"
+#include "util/CString.h"
+#include "util/events/Time.h"
 #include "util/events/EventBase.h"
 #include "util/events/Pipe.h"
 #include "util/events/Process.h"
-#include "util/Assert.h"
-#include "util/Base32.h"
 #include "util/Hex.h"
-#include "util/Security.h"
-#include "util/log/WriterLog.h"
+#include "util/log/Log.h"
+#include "util/log/FileWriterLog.h"
+#include "util/SysInfo.h"
 #include "util/version/Version.h"
+#include "net/Benchmark.h"
 
 #include "crypto_scalarmult_curve25519.h"
 
@@ -352,16 +345,6 @@ static int usage(struct Allocator* alloc, char* appName)
     return 0;
 }
 
-static int benchmark()
-{
-    struct Allocator* alloc = MallocAllocator_new(1<<22);
-    struct EventBase* base = EventBase_new(alloc);
-    struct Writer* logWriter = FileWriter_new(stdout, alloc);
-    struct Log* logger = WriterLog_new(logWriter, alloc);
-    CryptoAuth_benchmark(base, logger, alloc);
-    return 0;
-}
-
 struct CheckRunningInstanceContext
 {
     struct EventBase* base;
@@ -463,7 +446,8 @@ int main(int argc, char** argv)
         } else if (CString_strcmp(argv[1], "--reconf") == 0) {
             // Performed after reading the configuration
         } else if (CString_strcmp(argv[1], "--bench") == 0) {
-            return benchmark();
+            Benchmark_runAll();
+            return 0;
         } else if ((CString_strcmp(argv[1], "--version") == 0)
             || (CString_strcmp(argv[1], "-v") == 0))
         {
@@ -519,8 +503,7 @@ int main(int argc, char** argv)
         forceNoBackground = 1;
     }
 
-    struct Writer* logWriter = FileWriter_new(stdout, allocator);
-    struct Log* logger = WriterLog_new(logWriter, allocator);
+    struct Log* logger = FileWriterLog_new(stdout, allocator);
 
     // --------------------- Get Admin  --------------------- //
     Dict* configAdmin = Dict_getDict(&config, String_CONST("admin"));
@@ -603,7 +586,7 @@ int main(int argc, char** argv)
 
     struct Message* toAngelMsg = Message_new(0, 1024, allocator);
     BencMessageWriter_write(preConf, toAngelMsg, eh);
-    Interface_sendMessage(&angelPipe->iface, toAngelMsg);
+    Iface_CALL(angelPipe->iface.send, toAngelMsg, &angelPipe->iface);
 
     Log_debug(logger, "Sent [%d] bytes to angel process", toAngelMsg->length);
 

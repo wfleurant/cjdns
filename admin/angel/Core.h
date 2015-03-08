@@ -18,14 +18,13 @@
 #include "benc/String.h"
 #include "exception/Except.h"
 #include "memory/Allocator.h"
-#include "net/Ducttape.h"
+#include "tunnel/IpTunnel.h"
 #include "util/Linker.h"
 Linker_require("admin/angel/Core.c")
 
 void Core_initTunnel(String* desiredDeviceName,
                      struct Sockaddr* addr,
                      uint8_t addressPrefix,
-                     struct Ducttape* dt,
                      struct Log* logger,
                      struct IpTunnel* ipTunnel,
                      struct EventBase* eventBase,
@@ -35,7 +34,7 @@ void Core_initTunnel(String* desiredDeviceName,
 void Core_init(struct Allocator* alloc,
                struct Log* logger,
                struct EventBase* eventBase,
-               struct Interface* angelIface,
+               struct Iface* angelIface,
                struct Random* rand,
                struct Except* eh);
 

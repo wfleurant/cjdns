@@ -19,8 +19,7 @@
 #include "exception/Jmp.h"
 #include "memory/Allocator.h"
 #include "util/platform/netdev/NetDev.h"
-#include "interface/Interface.h"
-#include "interface/addressable/AddrInterfaceAdapter.h"
+#include "interface/addressable/AddrIfaceAdapter.h"
 #ifdef HAS_ETH_INTERFACE
 #include "interface/ETHInterface.h"
 #endif
@@ -32,7 +31,7 @@
 
 struct AngelContext
 {
-    struct Interface* coreIface;
+    struct Iface* coreIface;
     struct EventBase* eventBase;
     struct Allocator* alloc;
     struct Log* logger;
@@ -118,7 +117,7 @@ static void ethListDevices(Dict* args, void* vcontext, String* txid, struct Allo
 }
 #endif
 
-void Angel_start(struct Interface* coreIface,
+void Angel_start(struct Iface* coreIface,
                  struct EventBase* eventBase,
                  struct Log* logger,
                  struct Allocator* alloc)
@@ -131,10 +130,11 @@ void Angel_start(struct Interface* coreIface,
     };
     Identity_set(&ctx);
 
-    struct AddrInterface* addrIf = AddrInterfaceAdapter_new(coreIface, alloc);
+    struct AddrIfaceAdapter* addrIfAdapt = AddrIfaceAdapter_new(alloc);
+    Iface_plumb(&addrIfAdapt->inputIf, coreIface);
     // this is inside of a pipe so the password is unimportant.
     String* passwd = String_new("null", alloc);
-    ctx.admin = Admin_new(addrIf, alloc, NULL, eventBase, passwd);
+    ctx.admin = Admin_new(&addrIfAdapt->generic, NULL, eventBase, passwd);
 
     Admin_registerFunction("Angel_exit", adminExit, &ctx, false, NULL, ctx.admin);
 

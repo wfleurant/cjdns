@@ -24,44 +24,26 @@
 #include "crypto/AddressCalc.h"
 #include "crypto/random/Random.h"
 #include "crypto/random/libuv/LibuvEntropyProvider.h"
-#include "dht/ReplyModule.h"
-#include "dht/EncodingSchemeModule.h"
-#include "dht/SerializationModule.h"
-#include "dht/dhtcore/RouterModule.h"
-#include "dht/dhtcore/RouterModule_admin.h"
-#include "dht/dhtcore/RumorMill.h"
-#include "dht/dhtcore/SearchRunner.h"
-#include "dht/dhtcore/SearchRunner_admin.h"
-#include "dht/dhtcore/NodeStore_admin.h"
-#include "dht/dhtcore/Janitor.h"
-#include "dht/dhtcore/Router_new.h"
+#include "dht/Pathfinder.h"
 #include "exception/Jmp.h"
-#include "interface/addressable/AddrInterface.h"
-#include "interface/addressable/UDPAddrInterface.h"
+#include "interface/Iface.h"
+#include "util/events/UDPAddrIface.h"
+#include "interface/tuntap/TUNInterface.h"
 #include "interface/UDPInterface_admin.h"
 #ifdef HAS_ETH_INTERFACE
 #include "interface/ETHInterface_admin.h"
 #endif
-#include "interface/tuntap/TUNInterface.h"
-#include "interface/InterfaceConnector.h"
-#include "interface/InterfaceController_admin.h"
-#include "interface/FramingInterface.h"
+#include "net/InterfaceController_admin.h"
+#include "interface/addressable/PacketHeaderToUDPAddrIface.h"
+#include "interface/FramingIface.h"
 #include "interface/RainflyClient.h"
 #include "interface/RainflyClient_admin.h"
 #include "interface/DNSServer.h"
-#include "interface/addressable/PacketHeaderToUDPAddrInterface.h"
 #include "memory/Allocator.h"
 #include "memory/MallocAllocator.h"
 #include "memory/Allocator_admin.h"
-#include "net/Ducttape.h"
-#include "interface/InterfaceController.h"
-#include "net/SwitchPinger.h"
 #include "net/SwitchPinger_admin.h"
-#include "net/ControlHandler.h"
-#include "switch/SwitchCore.h"
-#include "tunnel/IpTunnel.h"
 #include "tunnel/IpTunnel_admin.h"
-#include "util/events/Timeout.h"
 #include "util/events/EventBase.h"
 #include "util/events/Pipe.h"
 #include "util/events/Timeout.h"
@@ -72,9 +54,11 @@
 #include "util/Security_admin.h"
 #include "util/Security.h"
 #include "util/version/Version.h"
-#include "interface/SessionManager_admin.h"
+#include "net/SessionManager_admin.h"
 #include "wire/SwitchHeader.h"
 #include "wire/CryptoHeader.h"
+#include "wire/Headers.h"
+#include "net/NetCore.h"
 
 #include <crypto_scalarmult_curve25519.h>
 
@@ -84,53 +68,23 @@
 // Failsafe: abort if more than 2^23 bytes are allocated (8MB)
 #define ALLOCATOR_FAILSAFE (1<<23)
 
-/** The number of milliseconds between attempting local maintenance searches. */
-#define LOCAL_MAINTENANCE_SEARCH_MILLISECONDS 1000
-
+// TODO(cjd): we need to begin detecting MTU and informing the OS properly!
 /**
- * The number of milliseconds to pass between global maintainence searches.
- * These are searches for random targets which are used to discover new nodes.
- */
-#define GLOBAL_MAINTENANCE_SEARCH_MILLISECONDS 30000
-
-#define RUMORMILL_CAPACITY 64
-
-/**
- * The worst possible packet overhead.
- * assuming the packet needs to be handed off to another node
- * because we have no route to the destination.
- * and the CryptoAuths to both the destination and the handoff node are both timed out.
+ * The worst possible packet overhead, we're in session setup with the endpoint.
  */
 #define WORST_CASE_OVERHEAD ( \
-    /* TODO(cjd): Headers_IPv4_SIZE */ 20 \
+      Headers_IP4Header_SIZE \
     + Headers_UDPHeader_SIZE \
     + 4 /* Nonce */ \
     + 16 /* Poly1305 authenticator */ \
     + SwitchHeader_SIZE \
     + CryptoHeader_SIZE \
-    + Headers_IP6Header_SIZE \
-    + CryptoHeader_SIZE \
+    + 4 /* Handle */ \
+    + DataHeader_SIZE \
 )
 
 /** The default MTU, assuming the external MTU is 1492 (common for PPPoE DSL) */
-#define DEFAULT_MTU ( \
-    1492 \
-  - WORST_CASE_OVERHEAD \
-  + Headers_IP6Header_SIZE /* The OS subtracts the IP6 header. */ \
-  + CryptoHeader_SIZE /* Linux won't let set the MTU below 1280.
-  TODO(cjd): make sure we never hand off to a node for which the CA session is expired. */ \
-)
-
-static void parsePrivateKey(uint8_t privateKey[32],
-                            struct Address* addr,
-                            struct Except* eh)
-{
-    crypto_scalarmult_curve25519_base(addr->key, privateKey);
-    AddressCalc_addressForPublicKey(addr->ip6.bytes, addr->key);
-    if (!AddressCalc_validAddress(addr->ip6.bytes)) {
-        Except_throw(eh, "Ip address outside of the FC00/8 range, invalid private key.");
-    }
-}
+#define DEFAULT_MTU ( 1492 - WORST_CASE_OVERHEAD )
 
 static void adminPing(Dict* input, void* vadmin, String* txid, struct Allocator* requestAlloc)
 {
@@ -147,41 +101,44 @@ static void adminPid(Dict* input, void* vadmin, String* txid, struct Allocator* 
 
 struct Context
 {
-    struct Allocator* allocator;
+    struct Allocator* alloc;
     struct Admin* admin;
     struct Log* logger;
     struct Hermes* hermes;
     struct EventBase* base;
+    struct NetCore* nc;
+    struct IpTunnel* ipTunnel;
     String* exitTxid;
+    Identity
 };
 
 static void shutdown(void* vcontext)
 {
-    struct Context* context = vcontext;
-    Allocator_free(context->allocator);
+    struct Context* context = Identity_check((struct Context*) vcontext);
+    Allocator_free(context->alloc);
 }
 
 static void onAngelExitResponse(Dict* message, void* vcontext)
 {
-    struct Context* context = vcontext;
+    struct Context* context = Identity_check((struct Context*) vcontext);
     Log_info(context->logger, "Angel stopped");
     Log_info(context->logger, "Exiting");
     Dict d = Dict_CONST(String_CONST("error"), String_OBJ(String_CONST("none")), NULL);
     Admin_sendMessage(&d, context->exitTxid, context->admin);
-    Timeout_setTimeout(shutdown, context, 1, context->base, context->allocator);
+    Timeout_setTimeout(shutdown, context, 1, context->base, context->alloc);
 }
 
 static void adminExit(Dict* input, void* vcontext, String* txid, struct Allocator* requestAlloc)
 {
-    struct Context* context = vcontext;
+    struct Context* context = Identity_check((struct Context*) vcontext);
     Log_info(context->logger, "Got request to exit");
     Log_info(context->logger, "Stopping angel");
-    context->exitTxid = String_clone(txid, context->allocator);
+    context->exitTxid = String_clone(txid, context->alloc);
     Dict angelExit = Dict_CONST(String_CONST("q"), String_OBJ(String_CONST("Angel_exit")), NULL);
     Hermes_callAngel(&angelExit,
                      onAngelExitResponse,
                      context,
-                     context->allocator,
+                     context->alloc,
                      NULL,
                      context->hermes);
 }
@@ -190,17 +147,6 @@ static void angelDied(struct Pipe* p, int status)
 {
     exit(1);
 }
-
-struct Core_Context
-{
-    struct Sockaddr* ipAddr;
-    struct Ducttape* ducttape;
-    struct Log* logger;
-    struct Allocator* alloc;
-    struct Admin* admin;
-    struct EventBase* eventBase;
-    struct IpTunnel* ipTunnel;
-};
 
 static void sendResponse(String* error,
                          struct Admin* admin,
@@ -212,21 +158,38 @@ static void sendResponse(String* error,
     Admin_sendMessage(output, txid, admin);
 }
 
+static void initTunnel2(String* desiredDeviceName,
+                        struct Context* ctx,
+                        uint8_t addressPrefix,
+                        struct Except* eh)
+{
+    Log_debug(ctx->logger, "Initializing TUN device [%s]",
+              (desiredDeviceName) ? desiredDeviceName->bytes : "<auto>");
+
+    char assignedTunName[TUNInterface_IFNAMSIZ];
+    char* desiredName = (desiredDeviceName) ? desiredDeviceName->bytes : NULL;
+
+    struct Iface* tun = TUNInterface_new(
+        desiredName, assignedTunName, 0, ctx->base, ctx->logger, eh, ctx->alloc);
+
+    Iface_plumb(tun, &ctx->nc->tunAdapt->tunIf);
+
+    IpTunnel_setTunName(assignedTunName, ctx->ipTunnel);
+
+    struct Sockaddr* myAddr =
+        Sockaddr_fromBytes(ctx->nc->myAddress->ip6.bytes, Sockaddr_AF_INET6, ctx->alloc);
+    NetDev_addAddress(assignedTunName, myAddr, addressPrefix, ctx->logger, eh);
+    NetDev_setMTU(assignedTunName, DEFAULT_MTU, ctx->logger, eh);
+}
+
 static void initTunnel(Dict* args, void* vcontext, String* txid, struct Allocator* requestAlloc)
 {
-    struct Core_Context* const ctx = (struct Core_Context*) vcontext;
+    struct Context* const ctx = Identity_check((struct Context*) vcontext);
 
     struct Jmp jmp;
     Jmp_try(jmp) {
-        Core_initTunnel(Dict_getString(args, String_CONST("desiredTunName")),
-                        ctx->ipAddr,
-                        8,
-                        ctx->ducttape,
-                        ctx->logger,
-                        ctx->ipTunnel,
-                        ctx->eventBase,
-                        ctx->alloc,
-                        &jmp.handler);
+        String* desiredName = Dict_getString(args, String_CONST("desiredTunName"));
+        initTunnel2(desiredName, ctx, 8, &jmp.handler);
     } Jmp_catch {
         String* error = String_printf(requestAlloc, "Failed to configure tunnel [%s]", jmp.message);
         sendResponse(error, ctx->admin, txid, requestAlloc);
@@ -236,63 +199,13 @@ static void initTunnel(Dict* args, void* vcontext, String* txid, struct Allocato
     sendResponse(String_CONST("none"), ctx->admin, txid, requestAlloc);
 }
 
-void Core_admin_register(struct Sockaddr* ipAddr,
-                         struct Ducttape* dt,
-                         struct Log* logger,
-                         struct IpTunnel* ipTunnel,
-                         struct Allocator* alloc,
-                         struct Admin* admin,
-                         struct EventBase* eventBase)
-{
-    struct Core_Context* ctx = Allocator_malloc(alloc, sizeof(struct Core_Context));
-    ctx->ipAddr = ipAddr;
-    ctx->ducttape = dt;
-    ctx->logger = logger;
-    ctx->alloc = alloc;
-    ctx->admin = admin;
-    ctx->eventBase = eventBase;
-    ctx->ipTunnel = ipTunnel;
-
-    struct Admin_FunctionArg args[] = {
-        { .name = "desiredTunName", .required = 0, .type = "String" }
-    };
-    Admin_registerFunction("Core_initTunnel", initTunnel, ctx, true, args, admin);
-}
-
-
-static Dict* getInitialConfig(struct Interface* iface,
+static Dict* getInitialConfig(struct Iface* iface,
                               struct EventBase* eventBase,
                               struct Allocator* alloc,
                               struct Except* eh)
 {
     struct Message* m = InterfaceWaiter_waitForData(iface, eventBase, alloc, eh);
     return BencMessageReader_read(m, alloc, eh);
-}
-
-void Core_initTunnel(String* desiredDeviceName,
-                     struct Sockaddr* addr,
-                     uint8_t addressPrefix,
-                     struct Ducttape* dt,
-                     struct Log* logger,
-                     struct IpTunnel* ipTunnel,
-                     struct EventBase* eventBase,
-                     struct Allocator* alloc,
-                     struct Except* eh)
-{
-    Log_debug(logger, "Initializing TUN device [%s]",
-              (desiredDeviceName) ? desiredDeviceName->bytes : "<auto>");
-
-    char assignedTunName[TUNInterface_IFNAMSIZ];
-    char* desiredName = (desiredDeviceName) ? desiredDeviceName->bytes : NULL;
-    struct Interface* tun =
-        TUNInterface_new(desiredName, assignedTunName, 0, eventBase, logger, eh, alloc);
-
-    IpTunnel_setTunName(assignedTunName, ipTunnel);
-
-    Ducttape_setUserInterface(dt, tun);
-
-    NetDev_addAddress(assignedTunName, addr, addressPrefix, logger, eh);
-    NetDev_setMTU(assignedTunName, DEFAULT_MTU, logger, eh);
 }
 
 /** This is a response from a call which is intended only to send information to the angel. */
@@ -304,7 +217,7 @@ static void angelResponse(Dict* resp, void* vNULL)
 void Core_init(struct Allocator* alloc,
                struct Log* logger,
                struct EventBase* eventBase,
-               struct Interface* angelIface,
+               struct Iface* angelIface,
                struct Random* rand,
                struct Except* eh)
 {
@@ -342,12 +255,10 @@ void Core_init(struct Allocator* alloc,
         Except_throw(eh, "bind address [%s] unparsable", bind->bytes);
     }
 
-    struct AddrInterface* udpAdmin =
-        UDPAddrInterface_new(eventBase, &bindAddr.addr, alloc, eh, logger);
+    struct UDPAddrIface* udpAdmin = UDPAddrIface_new(eventBase, &bindAddr.addr, alloc, eh, logger);
+    struct Admin* admin = Admin_new(&udpAdmin->generic, logger, eventBase, pass);
 
-    struct Admin* admin = Admin_new(udpAdmin, alloc, logger, eventBase, pass);
-
-    char* boundAddr = Sockaddr_print(udpAdmin->addr, tempAlloc);
+    char* boundAddr = Sockaddr_print(udpAdmin->generic.addr, tempAlloc);
     Dict adminResponse = Dict_CONST(
         String_CONST("bind"), String_OBJ(String_CONST(boundAddr)), NULL
     );
@@ -369,121 +280,64 @@ void Core_init(struct Allocator* alloc,
         logger = adminLogger;
     }
 
-    // CryptoAuth
-    struct Address* addr = Allocator_calloc(alloc, sizeof(struct Address), 1);
-    addr->protocolVersion = Version_CURRENT_PROTOCOL;
-    parsePrivateKey(privateKey, addr, eh);
-    struct CryptoAuth* cryptoAuth = CryptoAuth_new(alloc, privateKey, eventBase, logger, rand);
+    struct NetCore* nc = NetCore_new(privateKey, alloc, eventBase, rand, logger);
 
-    struct Sockaddr* myAddr = Sockaddr_fromBytes(addr->ip6.bytes, Sockaddr_AF_INET6, alloc);
+    struct IpTunnel* ipTunnel = IpTunnel_new(logger, eventBase, alloc, rand, hermes);
+    Iface_plumb(&nc->tunAdapt->ipTunnelIf, &ipTunnel->tunInterface);
+    Iface_plumb(&nc->upper->ipTunnelIf, &ipTunnel->nodeInterface);
 
-    struct SwitchCore* switchCore = SwitchCore_new(logger, alloc, eventBase);
-    struct DHTModuleRegistry* registry = DHTModuleRegistry_new(alloc);
-    ReplyModule_register(registry, alloc);
-
-    struct RumorMill* rumorMill = RumorMill_new(alloc, addr, RUMORMILL_CAPACITY, logger, "extern");
-
-    struct NodeStore* nodeStore = NodeStore_new(addr, alloc, eventBase, logger, rumorMill);
-
-    struct RouterModule* routerModule = RouterModule_register(registry,
-                                                              alloc,
-                                                              addr->key,
-                                                              eventBase,
-                                                              logger,
-                                                              rand,
-                                                              nodeStore);
-
-    struct SearchRunner* searchRunner = SearchRunner_new(nodeStore,
-                                                         logger,
-                                                         eventBase,
-                                                         routerModule,
-                                                         addr->ip6.bytes,
-                                                         rumorMill,
-                                                         alloc);
-
-    Janitor_new(LOCAL_MAINTENANCE_SEARCH_MILLISECONDS,
-                GLOBAL_MAINTENANCE_SEARCH_MILLISECONDS,
-                routerModule,
-                nodeStore,
-                searchRunner,
-                rumorMill,
-                logger,
-                alloc,
-                eventBase,
-                rand);
-
-    EncodingSchemeModule_register(registry, logger, alloc);
-
-    SerializationModule_register(registry, logger, alloc);
-
-    struct IpTunnel* ipTun = IpTunnel_new(logger, eventBase, alloc, rand, hermes);
-
-    struct Router* router = Router_new(routerModule, nodeStore, searchRunner, alloc);
-
-    struct Ducttape* dt = Ducttape_register(privateKey,
-                                            registry,
-                                            router,
-                                            eventBase,
-                                            alloc,
-                                            logger,
-                                            ipTun,
-                                            rand,
-                                            rumorMill);
-
-    SwitchCore_setRouterInterface(&dt->switchIf, switchCore);
-
-    struct ControlHandler* controlHandler = ControlHandler_new(alloc, logger, router, addr);
-    Interface_plumb(&controlHandler->coreIf, &dt->controlIf);
-    struct SwitchPinger* sp = SwitchPinger_new(eventBase, rand, logger, addr, alloc);
-    Interface_plumb(&controlHandler->switchPingerIf, &sp->controlHandlerIf);
-
-    // Interfaces.
-    struct InterfaceController* ifController =
-        InterfaceController_new(cryptoAuth, switchCore, router, rumorMill,
-                                logger, eventBase, sp, rand, alloc);
+    Pathfinder_register(alloc, logger, eventBase, rand, admin, nc->ee);
 
     // ------------------- DNS -------------------------//
 
     struct Sockaddr_storage rainflyAddr;
     Assert_true(!Sockaddr_parse("::", &rainflyAddr));
-    struct AddrInterface* rainflyIface =
-        UDPAddrInterface_new(eventBase, &rainflyAddr.addr, alloc, eh, logger);
-    struct RainflyClient* rainfly = RainflyClient_new(rainflyIface, eventBase, rand, logger);
+    struct UDPAddrIface* rainflyIface =
+        UDPAddrIface_new(eventBase, &rainflyAddr.addr, alloc, eh, logger);
+    struct RainflyClient* rainfly =
+        RainflyClient_new(&rainflyIface->generic, eventBase, rand, logger);
     Assert_true(!Sockaddr_parse("[fc00::1]:53", &rainflyAddr));
-    struct AddrInterface* magicUDP =
-        PacketHeaderToUDPAddrInterface_new(&dt->magicInterface, alloc, &rainflyAddr.addr);
-    DNSServer_new(magicUDP, logger, rainfly);
+    struct PacketHeaderToUDPAddrIface* magicUDP =
+        PacketHeaderToUDPAddrIface_new(alloc, &rainflyAddr.addr);
+//    Iface_plumb(&magicUDP->headerIf, &dtAAAAAAAAAAAAAA->magicIf);
+    DNSServer_new(&magicUDP->udpIf, logger, rainfly);
 
 
     // ------------------- Register RPC functions ----------------------- //
-    InterfaceController_admin_register(ifController, nodeStore, admin, alloc);
-    SwitchPinger_admin_register(sp, admin, alloc);
-    UDPInterface_admin_register(eventBase, alloc, logger, admin, ifController);
+    InterfaceController_admin_register(nc->ifController, admin, alloc);
+    SwitchPinger_admin_register(nc->sp, admin, alloc);
+    UDPInterface_admin_register(eventBase, alloc, logger, admin, nc->ifController);
 #ifdef HAS_ETH_INTERFACE
-    ETHInterface_admin_register(eventBase, alloc, logger, admin, ifController, hermes);
+    ETHInterface_admin_register(eventBase, alloc, logger, admin, nc->ifController, hermes);
 #endif
-    NodeStore_admin_register(nodeStore, admin, alloc);
-    RouterModule_admin_register(routerModule, router, admin, alloc);
-    SearchRunner_admin_register(searchRunner, admin, alloc);
-    AuthorizedPasswords_init(admin, cryptoAuth, alloc);
+
+    AuthorizedPasswords_init(admin, nc->ca, alloc);
     Admin_registerFunction("ping", adminPing, admin, false, NULL, admin);
-    Core_admin_register(myAddr, dt, logger, ipTun, alloc, admin, eventBase);
+//    Core_admin_register(myAddr, logger, ipTun, alloc, admin, eventBase);
     Security_admin_register(alloc, logger, admin);
-    IpTunnel_admin_register(ipTun, admin, alloc);
-    SessionManager_admin_register(dt->sessionManager, admin, alloc);
+    IpTunnel_admin_register(ipTunnel, admin, alloc);
+    SessionManager_admin_register(nc->sm, admin, alloc);
     RainflyClient_admin_register(rainfly, admin, alloc);
     Allocator_admin_register(alloc, admin);
 
-    struct Context* ctx = Allocator_clone(alloc, (&(struct Context) {
-        .allocator = alloc,
-        .admin = admin,
-        .logger = logger,
-        .hermes = hermes,
-        .base = eventBase,
-    }));
+    struct Context* ctx = Allocator_calloc(alloc, sizeof(struct Context), 1);
+    Identity_set(ctx);
+    ctx->alloc = alloc;
+    ctx->admin = admin;
+    ctx->logger = logger;
+    ctx->hermes = hermes;
+    ctx->base = eventBase;
+    ctx->ipTunnel = ipTunnel;
+    ctx->nc = nc;
+
     Admin_registerFunction("Core_exit", adminExit, ctx, true, NULL, admin);
 
     Admin_registerFunction("Core_pid", adminPid, admin, false, NULL, admin);
+
+    Admin_registerFunction("Core_initTunnel", initTunnel, ctx, true,
+        ((struct Admin_FunctionArg[]) {
+            { .name = "desiredTunName", .required = 0, .type = "String" }
+        }), admin);
 }
 
 int Core_main(int argc, char** argv)
@@ -513,7 +367,7 @@ int Core_main(int argc, char** argv)
     angelPipe->logger = logger;
     angelPipe->onClose = angelDied;
 
-    struct Interface* angelIface = FramingInterface_new(65535, &angelPipe->iface, alloc);
+    struct Iface* angelIface = FramingIface_new(65535, &angelPipe->iface, alloc);
 
     Core_init(alloc, logger, eventBase, angelIface, rand, eh);
     EventBase_beginLoop(eventBase);

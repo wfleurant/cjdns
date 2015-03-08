@@ -19,8 +19,7 @@
 #include "benc/serialization/standard/BencMessageReader.h"
 #include "benc/serialization/standard/BencMessageWriter.h"
 #include "crypto/random/Random.h"
-#include "interface/Interface.h"
-#include "interface/FramingInterface.h"
+#include "interface/FramingIface.h"
 #include "io/FileWriter.h"
 #include "memory/Allocator.h"
 #include "memory/MallocAllocator.h"
@@ -57,18 +56,6 @@ static void initCore(char* coreBinaryPath,
     if (Process_spawn(coreBinaryPath, args, base, alloc)) {
         Except_throw(eh, "Failed to spawn core process.");
     }
-}
-
-static void sendConfToCore(struct Interface* toCoreInterface,
-                           struct Allocator* tempAlloc,
-                           Dict* config,
-                           struct Except* eh,
-                           struct Log* logger)
-{
-    struct Message* msg = Message_new(0, 1024, tempAlloc);
-    BencMessageWriter_write(config, msg, eh);
-    Log_keys(logger, "Sent [%d] bytes to core", msg->length);
-    toCoreInterface->sendMessage(msg, toCoreInterface);
 }
 
 static void setUser(char* user, struct Log* logger, struct Except* eh)
@@ -190,7 +177,7 @@ int AngelInit_main(int argc, char** argv)
     struct Pipe* corePipe = Pipe_named(corePipeName->bytes, eventBase, eh, alloc);
     corePipe->logger = logger;
     corePipe->onClose = coreDied;
-    struct Interface* coreIface = FramingInterface_new(65535, &corePipe->iface, alloc);
+    struct Iface* coreIface = FramingIface_new(65535, &corePipe->iface, alloc);
 
     if (core) {
         Log_info(logger, "Initializing core [%s]", core->bytes);
@@ -199,12 +186,14 @@ int AngelInit_main(int argc, char** argv)
 
     Log_debug(logger, "Sending pre-configuration to core.");
 
-
-    sendConfToCore(coreIface, tempAlloc, config, eh, logger);
+    struct Message* msg = Message_new(0, 1024, tempAlloc);
+    BencMessageWriter_write(config, msg, eh);
+    Log_keys(logger, "Sent [%d] bytes to core", msg->length);
+    Iface_CALL(coreIface->send, msg, coreIface);
 
     struct Message* coreResponse = InterfaceWaiter_waitForData(coreIface, eventBase, tempAlloc, eh);
 
-    Interface_sendMessage(&clientPipe->iface, coreResponse);
+    Iface_CALL(clientPipe->iface.send, coreResponse, &clientPipe->iface);
 
     #ifdef Log_KEYS
         uint8_t lastChar = coreResponse->bytes[coreResponse->length-1];
@@ -218,6 +207,7 @@ int AngelInit_main(int argc, char** argv)
     }
 
     Allocator_free(tempAlloc);
+    Log_debug(logger, "Angel_start()");
     Angel_start(coreIface, eventBase, logger, alloc);
     return 0;
 }

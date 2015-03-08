@@ -18,7 +18,6 @@
 #include "benc/Dict.h"
 #include "benc/serialization/standard/BencMessageWriter.h"
 #include "benc/serialization/standard/BencMessageReader.h"
-#include "interface/addressable/AddrInterface.h"
 #include "memory/Allocator.h"
 #include "util/Assert.h"
 #include "util/Bits.h"
@@ -28,7 +27,7 @@
 #include "util/events/Timeout.h"
 #include "util/Identity.h"
 #include "util/platform/Sockaddr.h"
-
+#include "util/Defined.h"
 
 #include <crypto_hash_sha256.h>
 
@@ -87,8 +86,12 @@ struct Function
     Dict* args;
 };
 
-struct Admin
+struct Admin_pvt
 {
+    struct Admin pub;
+
+    struct Iface iface;
+
     struct EventBase* eventBase;
 
     struct Function* functions;
@@ -98,8 +101,6 @@ struct Admin
 
     String* password;
     struct Log* logger;
-
-    struct AddrInterface* iface;
 
     struct Map_LastMessageTimeByAddr map;
 
@@ -115,23 +116,23 @@ struct Admin
     Identity
 };
 
-static uint8_t sendMessage(struct Message* message, struct Sockaddr* dest, struct Admin* admin)
+static void sendMessage(struct Message* message, struct Sockaddr* dest, struct Admin_pvt* admin)
 {
     // stack overflow when used with admin logger.
     //Log_keys(admin->logger, "sending message to angel [%s]", message->bytes);
     Message_push(message, dest, dest->addrLen, NULL);
-    return admin->iface->generic.sendMessage(message, &admin->iface->generic);
+    Iface_send(&admin->iface, message);
 }
 
-static int sendBenc(Dict* message,
-                    struct Sockaddr* dest,
-                    struct Allocator* alloc,
-                    struct Admin* admin)
+static void sendBenc(Dict* message,
+                     struct Sockaddr* dest,
+                     struct Allocator* alloc,
+                     struct Admin_pvt* admin)
 {
     #define sendBenc_PADDING 32
     struct Message* msg = Message_new(0, Admin_MAX_RESPONSE_SIZE + sendBenc_PADDING, alloc);
     BencMessageWriter_write(message, msg, NULL);
-    return sendMessage(msg, dest, admin);
+    sendMessage(msg, dest, admin);
 }
 
 /**
@@ -139,7 +140,7 @@ static int sendBenc(Dict* message,
  * then Admin_sendMessage() should fail so that it doesn't endlessly send
  * udp packets into outer space after a logging client disconnects.
  */
-static int checkAddress(struct Admin* admin, int index, uint64_t now)
+static int checkAddress(struct Admin_pvt* admin, int index, uint64_t now)
 {
     uint64_t diff = now - admin->map.values[index]->timeOfLastMessage;
     // check for backwards time
@@ -154,7 +155,7 @@ static int checkAddress(struct Admin* admin, int index, uint64_t now)
 
 static void clearExpiredAddresses(void* vAdmin)
 {
-    struct Admin* admin = Identity_check((struct Admin*) vAdmin);
+    struct Admin_pvt* admin = Identity_check((struct Admin_pvt*) vAdmin);
     uint64_t now = Time_currentTimeMilliseconds(admin->eventBase);
     int count = 0;
     for (int i = admin->map.count - 1; i >= 0; i--) {
@@ -168,8 +169,9 @@ static void clearExpiredAddresses(void* vAdmin)
 /**
  * public function to send responses
  */
-int Admin_sendMessage(Dict* message, String* txid, struct Admin* admin)
+int Admin_sendMessage(Dict* message, String* txid, struct Admin* adminPub)
 {
+    struct Admin_pvt* admin = Identity_check((struct Admin_pvt*) adminPub);
     if (!admin) {
         return 0;
     }
@@ -202,14 +204,14 @@ int Admin_sendMessage(Dict* message, String* txid, struct Admin* admin)
         Dict_putString(message, TXID, &userTxid, alloc);
     }
 
-    int ret = sendBenc(message, &addr.addr, alloc, admin);
+    sendBenc(message, &addr.addr, alloc, admin);
 
     Allocator_free(alloc);
 
-    return ret;
+    return 0;
 }
 
-static inline bool authValid(Dict* message, struct Message* messageBytes, struct Admin* admin)
+static inline bool authValid(Dict* message, struct Message* messageBytes, struct Admin_pvt* admin)
 {
     String* cookieStr = Dict_getString(message, String_CONST("cookie"));
     uint32_t cookie = (cookieStr != NULL) ? strtoll(cookieStr->bytes, NULL, 10) : 0;
@@ -244,7 +246,7 @@ static bool checkArgs(Dict* args,
                       struct Function* func,
                       String* txid,
                       struct Allocator* requestAlloc,
-                      struct Admin* admin)
+                      struct Admin_pvt* admin)
 {
     struct Dict_Entry* entry = *func->args;
     String* error = NULL;
@@ -271,23 +273,23 @@ static bool checkArgs(Dict* args,
     }
     if (error) {
         Dict d = Dict_CONST(String_CONST("error"), String_OBJ(error), NULL);
-        Admin_sendMessage(&d, txid, admin);
+        Admin_sendMessage(&d, txid, &admin->pub);
     }
     return !error;
 }
 
 static void asyncEnabled(Dict* args, void* vAdmin, String* txid, struct Allocator* requestAlloc)
 {
-    struct Admin* admin = Identity_check((struct Admin*) vAdmin);
+    struct Admin_pvt* admin = Identity_check((struct Admin_pvt*) vAdmin);
     int64_t enabled = admin->asyncEnabled;
     Dict d = Dict_CONST(String_CONST("asyncEnabled"), Int_OBJ(enabled), NULL);
-    Admin_sendMessage(&d, txid, admin);
+    Admin_sendMessage(&d, txid, &admin->pub);
 }
 
 #define ENTRIES_PER_PAGE 8
 static void availableFunctions(Dict* args, void* vAdmin, String* txid, struct Allocator* tempAlloc)
 {
-    struct Admin* admin = Identity_check((struct Admin*) vAdmin);
+    struct Admin_pvt* admin = Identity_check((struct Admin_pvt*) vAdmin);
     int64_t* page = Dict_getInt(args, String_CONST("page"));
     uint32_t i = (page) ? *page * ENTRIES_PER_PAGE : 0;
 
@@ -303,14 +305,14 @@ static void availableFunctions(Dict* args, void* vAdmin, String* txid, struct Al
     }
     Dict_putDict(d, String_CONST("availableFunctions"), functions, tempAlloc);
 
-    Admin_sendMessage(d, txid, admin);
+    Admin_sendMessage(d, txid, &admin->pub);
 }
 
 static void handleRequest(Dict* messageDict,
                           struct Message* message,
                           struct Sockaddr* src,
                           struct Allocator* allocator,
-                          struct Admin* admin)
+                          struct Admin_pvt* admin)
 {
     String* query = Dict_getString(messageDict, String_CONST("q"));
     if (!query) {
@@ -336,7 +338,7 @@ static void handleRequest(Dict* messageDict,
         snprintf(bytes, 32, "%u", (uint32_t) Time_currentTimeSeconds(admin->eventBase));
         String* theCookie = &(String) { .len = CString_strlen(bytes), .bytes = bytes };
         Dict_putString(d, cookie, theCookie, allocator);
-        Admin_sendMessage(d, txid, admin);
+        Admin_sendMessage(d, txid, &admin->pub);
         return;
     }
 
@@ -347,7 +349,7 @@ static void handleRequest(Dict* messageDict,
         if (!authValid(messageDict, message, admin)) {
             Dict* d = Dict_new(allocator);
             Dict_putString(d, String_CONST("error"), String_CONST("Auth failed."), allocator);
-            Admin_sendMessage(d, txid, admin);
+            Admin_sendMessage(d, txid, &admin->pub);
             return;
         }
         query = Dict_getString(messageDict, String_CONST("aq"));
@@ -392,7 +394,7 @@ static void handleRequest(Dict* messageDict,
                                     "try Admin_availableFunctions()")),
             NULL
         );
-        Admin_sendMessage(&d, txid, admin);
+        Admin_sendMessage(&d, txid, &admin->pub);
     }
 
     return;
@@ -401,15 +403,15 @@ static void handleRequest(Dict* messageDict,
 static void handleMessage(struct Message* message,
                           struct Sockaddr* src,
                           struct Allocator* alloc,
-                          struct Admin* admin)
+                          struct Admin_pvt* admin)
 {
-    #ifdef Log_KEYS
+    if (Defined(Log_KEYS)) {
         uint8_t lastChar = message->bytes[message->length - 1];
         message->bytes[message->length - 1] = '\0';
         Log_keys(admin->logger, "Got message from [%s] [%s]",
                  Sockaddr_print(src, alloc), message->bytes);
         message->bytes[message->length - 1] = lastChar;
-    #endif
+    }
 
     // handle non empty message data
     if (message->length > Admin_MAX_REQUEST_SIZE) {
@@ -444,9 +446,9 @@ static void handleMessage(struct Message* message,
     handleRequest(messageDict, message, src, alloc, admin);
 }
 
-static uint8_t receiveMessage(struct Message* message, struct Interface* iface)
+static Iface_DEFUN receiveMessage(struct Message* message, struct Iface* iface)
 {
-    struct Admin* admin = Identity_check((struct Admin*) iface->receiverContext);
+    struct Admin_pvt* admin = Identity_containerOf(iface, struct Admin_pvt, iface);
 
     Assert_ifParanoid(message->length >= (int)admin->addrLen);
     struct Sockaddr_storage addrStore = { .addr = { .addrLen = 0 } };
@@ -459,7 +461,7 @@ static uint8_t receiveMessage(struct Message* message, struct Interface* iface)
 
     admin->currentRequest = NULL;
     Allocator_free(alloc);
-    return 0;
+    return NULL;
 }
 
 void Admin_registerFunctionWithArgCount(char* name,
@@ -468,12 +470,9 @@ void Admin_registerFunctionWithArgCount(char* name,
                                         bool needsAuth,
                                         struct Admin_FunctionArg* arguments,
                                         int argCount,
-                                        struct Admin* admin)
+                                        struct Admin* adminPub)
 {
-    if (!admin) {
-        return;
-    }
-    Identity_check(admin);
+    struct Admin_pvt* admin = Identity_check((struct Admin_pvt*) adminPub);
 
     String* str = String_new(name, admin->allocator);
     admin->functions =
@@ -510,36 +509,31 @@ void Admin_registerFunctionWithArgCount(char* name,
     }
 }
 
-struct Admin* Admin_new(struct AddrInterface* iface,
-                        struct Allocator* alloc,
+struct Admin* Admin_new(struct AddrIface* ai,
                         struct Log* logger,
                         struct EventBase* eventBase,
                         String* password)
 {
-    struct Admin* admin = Allocator_clone(alloc, (&(struct Admin) {
-        .iface = iface,
-        .allocator = alloc,
-        .logger = logger,
-        .eventBase = eventBase,
-        .addrLen = iface->addr->addrLen,
-        .map = {
-            .allocator = alloc
-        }
-    }));
+    struct Allocator* alloc = ai->alloc;
+    struct Admin_pvt* admin = Allocator_calloc(alloc, sizeof(struct Admin_pvt), 1);
     Identity_set(admin);
+    admin->allocator = alloc;
+    admin->logger = logger;
+    admin->eventBase = eventBase;
+    admin->addrLen = ai->addr->addrLen;
+    admin->map.allocator = alloc;
+    admin->iface.send = receiveMessage;
+    Iface_plumb(&admin->iface, &ai->iface);
 
     admin->password = String_clone(password, alloc);
 
     Timeout_setInterval(clearExpiredAddresses, admin, TIMEOUT_MILLISECONDS * 3, eventBase, alloc);
 
-    iface->generic.receiveMessage = receiveMessage;
-    iface->generic.receiverContext = admin;
-
-    Admin_registerFunction("Admin_asyncEnabled", asyncEnabled, admin, false, NULL, admin);
+    Admin_registerFunction("Admin_asyncEnabled", asyncEnabled, admin, false, NULL, &admin->pub);
     Admin_registerFunction("Admin_availableFunctions", availableFunctions, admin, false,
         ((struct Admin_FunctionArg[]) {
             { .name = "page", .required = 0, .type = "Int" }
-        }), admin);
+        }), &admin->pub);
 
-    return admin;
+    return &admin->pub;
 }

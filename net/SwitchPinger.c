@@ -76,7 +76,7 @@ struct Ping
 };
 
 // incoming message from network, pointing to the beginning of the switch header.
-static int messageFromControlHandler(struct Interface_Two* iface, struct Message* msg)
+static Iface_DEFUN messageFromControlHandler(struct Message* msg, struct Iface* iface)
 {
     struct SwitchPinger_pvt* ctx = Identity_check((struct SwitchPinger_pvt*) iface);
     struct SwitchHeader* switchHeader = (struct SwitchHeader*) msg->bytes;
@@ -95,48 +95,48 @@ static int messageFromControlHandler(struct Interface_Two* iface, struct Message
     Assert_true(handle == 0xffffffff);
 
     struct Control* ctrl = (struct Control*) msg->bytes;
-    if (ctrl->type_be == Control_PONG_be) {
-        Message_shift(msg, -Control_HEADER_SIZE, NULL);
+    if (ctrl->header.type_be == Control_PONG_be) {
+        Message_shift(msg, -Control_Header_SIZE, NULL);
         ctx->error = Error_NONE;
         if (msg->length >= Control_Pong_MIN_SIZE) {
             struct Control_Ping* pongHeader = (struct Control_Ping*) msg->bytes;
             ctx->incomingVersion = Endian_bigEndianToHost32(pongHeader->version_be);
             if (pongHeader->magic != Control_Pong_MAGIC) {
                 Log_debug(ctx->logger, "dropped invalid switch pong");
-                return Error_INVALID;
+                return NULL;
             }
             Message_shift(msg, -Control_Pong_HEADER_SIZE, NULL);
         } else {
             Log_debug(ctx->logger, "got runt pong message, length: [%d]", msg->length);
-            return Error_INVALID;
+            return NULL;
         }
 
-    } else if (ctrl->type_be == Control_KEYPONG_be) {
-        Message_shift(msg, -Control_HEADER_SIZE, NULL);
+    } else if (ctrl->header.type_be == Control_KEYPONG_be) {
+        Message_shift(msg, -Control_Header_SIZE, NULL);
         ctx->error = Error_NONE;
         if (msg->length >= Control_KeyPong_HEADER_SIZE && msg->length <= Control_KeyPong_MAX_SIZE) {
             struct Control_KeyPing* pongHeader = (struct Control_KeyPing*) msg->bytes;
             ctx->incomingVersion = Endian_bigEndianToHost32(pongHeader->version_be);
             if (pongHeader->magic != Control_KeyPong_MAGIC) {
                 Log_debug(ctx->logger, "dropped invalid switch key-pong");
-                return Error_INVALID;
+                return NULL;
             }
             Bits_memcpyConst(ctx->incomingKey, pongHeader->key, 32);
             Message_shift(msg, -Control_KeyPong_HEADER_SIZE, NULL);
         } else if (msg->length > Control_KeyPong_MAX_SIZE) {
             Log_debug(ctx->logger, "got overlong key-pong message, length: [%d]", msg->length);
-            return Error_INVALID;
+            return NULL;
         } else {
             Log_debug(ctx->logger, "got runt key-pong message, length: [%d]", msg->length);
-            return Error_INVALID;
+            return NULL;
         }
 
-    } else if (ctrl->type_be == Control_ERROR_be) {
-        Message_shift(msg, -Control_HEADER_SIZE, NULL);
+    } else if (ctrl->header.type_be == Control_ERROR_be) {
+        Message_shift(msg, -Control_Header_SIZE, NULL);
         Assert_true((uint8_t*)&ctrl->content.error.errorType_be == msg->bytes);
-        if (msg->length < (Control_Error_HEADER_SIZE + SwitchHeader_SIZE + Control_HEADER_SIZE)) {
+        if (msg->length < (Control_Error_HEADER_SIZE + SwitchHeader_SIZE + Control_Header_SIZE)) {
             Log_debug(ctx->logger, "runt error packet");
-            return Error_NONE;
+            return NULL;
         }
 
         ctx->error = Message_pop32(msg, NULL);
@@ -148,13 +148,13 @@ static int messageFromControlHandler(struct Interface_Two* iface, struct Message
 
         Log_debug(ctx->logger, "error [%s] was caused by our [%s]",
                   Error_strerror(ctx->error),
-                  Control_typeString(origCtrl->type_be));
+                  Control_typeString(origCtrl->header.type_be));
 
         int shift;
-        if (origCtrl->type_be == Control_PING_be) {
-            shift = -(Control_HEADER_SIZE + Control_Ping_HEADER_SIZE);
-        } else if (origCtrl->type_be == Control_KEYPING_be) {
-            shift = -(Control_HEADER_SIZE + Control_KeyPing_HEADER_SIZE);
+        if (origCtrl->header.type_be == Control_PING_be) {
+            shift = -(Control_Header_SIZE + Control_Ping_HEADER_SIZE);
+        } else if (origCtrl->header.type_be == Control_KEYPING_be) {
+            shift = -(Control_Header_SIZE + Control_KeyPing_HEADER_SIZE);
         } else {
             Assert_failure("problem in Ducttape.c");
         }
@@ -171,7 +171,7 @@ static int messageFromControlHandler(struct Interface_Two* iface, struct Message
     String* msgStr = &(String) { .bytes = (char*) msg->bytes, .len = msg->length };
     Pinger_pongReceived(msgStr, ctx->pinger);
     Bits_memset(ctx->incomingKey, 0, 32);
-    return Error_NONE;
+    return NULL;
 }
 
 static void onPingResponse(String* data, uint32_t milliseconds, void* vping)
@@ -234,11 +234,11 @@ static void sendPing(String* data, void* sendPingContext)
         pingHeader->version_be = Endian_hostToBigEndian32(Version_CURRENT_PROTOCOL);
     }
 
-    Message_shift(msg, Control_HEADER_SIZE, NULL);
+    Message_shift(msg, Control_Header_SIZE, NULL);
     struct Control* ctrl = (struct Control*) msg->bytes;
-    ctrl->checksum_be = 0;
-    ctrl->type_be = (p->pub.keyPing) ? Control_KEYPING_be : Control_PING_be;
-    ctrl->checksum_be = Checksum_engine(msg->bytes, msg->length);
+    ctrl->header.checksum_be = 0;
+    ctrl->header.type_be = (p->pub.keyPing) ? Control_KEYPING_be : Control_PING_be;
+    ctrl->header.checksum_be = Checksum_engine(msg->bytes, msg->length);
 
     #ifdef Version_7_COMPAT
         if (0) {
@@ -261,7 +261,7 @@ static void sendPing(String* data, void* sendPingContext)
         SwitchHeader_setVersion(switchHeader, 0);
     #endif
 
-    Interface_send(&p->context->pub.controlHandlerIf, msg);
+    Iface_send(&p->context->pub.controlHandlerIf, msg);
 }
 
 static String* RESULT_STRING_OK =             String_CONST_SO("pong");

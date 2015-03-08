@@ -15,9 +15,10 @@
 #ifndef Admin_H
 #define Admin_H
 
+#include "interface/Iface.h"
+#include "interface/addressable/AddrIface.h"
 #include "benc/Dict.h"
 #include "exception/Except.h"
-#include "interface/addressable/AddrInterface.h"
 #include "memory/Allocator.h"
 #include "util/log/Log.h"
 #include "util/UniqueName.h"
@@ -30,7 +31,10 @@ Linker_require("admin/Admin.c")
 typedef void (* Admin_Function)
     (Dict* args, void* vcontext, String* txid, struct Allocator* requestAlloc);
 
-struct Admin;
+struct Admin
+{
+    int unused;
+};
 
 struct Admin_FunctionArg
 {
@@ -68,8 +72,7 @@ void Admin_registerFunctionWithArgCount(char* name,
 #define Admin_sendMessage_CHANNEL_CLOSED -1
 int Admin_sendMessage(Dict* message, String* txid, struct Admin* admin);
 
-struct Admin* Admin_new(struct AddrInterface* iface,
-                        struct Allocator* alloc,
+struct Admin* Admin_new(struct AddrIface* ai,
                         struct Log* logger,
                         struct EventBase* eventBase,
                         String* password);

@@ -16,7 +16,6 @@
 #define CryptoAuth_pvt_H
 #include "crypto/CryptoAuth.h"
 #include "crypto/ReplayProtector.h"
-#include "interface/Interface.h"
 #include "benc/Object.h"
 #include "util/log/Log.h"
 #include "memory/Allocator.h"
@@ -56,23 +55,11 @@ struct CryptoAuth_pvt
 };
 
 
-struct CryptoAuth_Wrapper
+struct CryptoAuth_Session_pvt
 {
-    /** The public key of the other node, all zeros is taken to mean "don't know" */
-    uint8_t herPerminentPubKey[32];
+    struct CryptoAuth_Session pub;
 
-    /**
-     * Bind this CryptoAuth session to the other node's ip6 address,
-     * any packet avertizing a key which doesn't hash to this will be dropped.
-     */
-    uint8_t herIp6[16];
-
-    /**
-     * If an object was associated with a password and the remote host authed
-     * with the password this will be the object, otherwise it will be null.
-     */
-    String* user;
-    uint8_t* restrictedToip6;
+    struct Allocator* alloc;
 
     /** The shared secret. */
     uint8_t sharedSecret[32];
@@ -83,14 +70,8 @@ struct CryptoAuth_Wrapper
 
     uint8_t ourTempPubKey[32];
 
-    /** An outgoing message which is buffered in the event that a reverse handshake is required. */
-    struct Message* bufferedMessage;
-
     /** A password to use for authing with the other party. */
     String* password;
-
-    /** Used for preventing replay attacks. */
-    struct ReplayProtector replayProtector;
 
     /** The next nonce to use. */
     uint32_t nextNonce;
@@ -99,7 +80,7 @@ struct CryptoAuth_Wrapper
     uint32_t timeOfLastPacket;
 
     /** The method to use for trying to auth with the server. */
-    uint8_t authType;
+    int authType : 8;
 
     /** True if this node began the conversation. */
     bool isInitiator : 1;
@@ -110,26 +91,20 @@ struct CryptoAuth_Wrapper
     bool established : 1;
 
     /** A pointer back to the main cryptoauth context. */
-    struct CryptoAuth_pvt* const context;
+    struct CryptoAuth_pvt* context;
 
-    /** The internal interface which we are wrapping. */
-    struct Interface* const wrappedInterface;
-
-    /** The interface which this wrapper provides. */
-    struct Interface externalInterface;
-
-    /** A name for the wrapper which will appear in logs. */
+    /** A name for the session which will appear in logs. */
     char* name;
 
     Identity
 };
 
 
-uint8_t CryptoAuth_receiveMessage(struct Message* received, struct Interface* interface);
+//uint8_t CryptoAuth_receiveMessage(struct Message* received, struct Iface* interface);
 
-uint8_t CryptoAuth_encryptHandshake(struct Message* message,
-                                    struct CryptoAuth_Wrapper* wrapper,
-                                    int setupMessage);
+//uint8_t CryptoAuth_encryptHandshake(struct Message* message,
+//                                    struct CryptoAuth_Wrapper* wrapper,
+//                                    int setupMessage);
 
 int CryptoAuth_decryptRndNonce(uint8_t nonce[24], struct Message* msg, uint8_t secret[32]);
 

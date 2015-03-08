@@ -15,11 +15,18 @@
 #ifndef BSDMessageTypeWrapper_H
 #define BSDMessageTypeWrapper_H
 
-#include "interface/Interface.h"
+#include "interface/Iface.h"
+#include "memory/Allocator.h"
 #include "util/log/Log.h"
 #include "util/Linker.h"
 Linker_require("interface/tuntap/BSDMessageTypeWrapper.c")
 
-struct Interface* BSDMessageTypeWrapper_new(struct Interface* wrapped, struct Log* logger);
+struct BSDMessageTypeWrapper
+{
+    struct Iface inside;
+    struct Iface wireSide;
+};
+
+struct BSDMessageTypeWrapper* BSDMessageTypeWrapper_new(struct Allocator* alloc, struct Log* log);
 
 #endif

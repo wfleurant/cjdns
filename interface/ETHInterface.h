@@ -15,10 +15,10 @@
 #ifndef ETHInterface_H
 #define ETHInterface_H
 
+#include "interface/addressable/AddrIface.h"
 #include "benc/List.h"
 #include "util/events/EventBase.h"
-#include "interface/Interface.h"
-#include "interface/InterfaceController.h"
+#include "net/InterfaceController.h"
 #include "util/Gcc.h"
 #include "util/Assert.h"
 #include "util/log/Log.h"
@@ -56,21 +56,16 @@ Assert_compileTime(sizeof(struct ETHInterface_Sockaddr) == ETHInterface_Sockaddr
 
 #define ETHInterface_CURRENT_VERSION 0
 
-/**
- * @param base the LibEvent context.
- * @param bindDevice the name of the device to bind to.
- * @param allocator the memory allocator for this message.
- * @param exHandler the handler to deal with whatever exception arises.
- * @param logger
- * @param ic the controller which this interface should register with
- *           and use when starting connections.
- * @return a new ETHInterface.
- */
-struct Interface* ETHInterface_new(struct EventBase* eventBase,
-                                   const char* bindDevice,
-                                   struct Allocator* alloc,
-                                   struct Except* exHandler,
-                                   struct Log* logger);
+struct ETHInterface
+{
+    struct AddrIface generic;
+};
+
+struct ETHInterface* ETHInterface_new(struct EventBase* eventBase,
+                                      const char* bindDevice,
+                                      struct Allocator* alloc,
+                                      struct Except* exHandler,
+                                      struct Log* logger);
 
 List* ETHInterface_listDevices(struct Allocator* alloc, struct Except* eh);
 

@@ -16,11 +16,12 @@
 #include "io/FileWriter.h"
 #include "memory/MallocAllocator.h"
 #include "memory/Allocator.h"
+#include "crypto/random/Random.h"
+#include "interface/Iface.h"
 #include "util/Base32.h"
 #include "util/Checksum.h"
 #include "util/log/WriterLog.h"
 #include "test/TestFramework.h"
-#include "net/Ducttape_pvt.h"
 #include "wire/Headers.h"
 #include "wire/Ethernet.h"
 #include "interface/tuntap/TUNMessageType.h"
@@ -28,32 +29,9 @@
 #include "util/events/Time.h"
 #include "util/events/Timeout.h"
 #include "dht/dhtcore/NodeStore.h"
+#include "dht/Pathfinder_pvt.h"
 
 #include <stdio.h>
-
-
-#define TUNB 2
-#define TUNA 1
-
-static uint8_t incomingTunB(struct Message* msg, struct Interface* iface)
-{
-    Assert_true(TUNMessageType_pop(msg, NULL) == Ethernet_TYPE_IP6);
-    Message_shift(msg, -Headers_IP6Header_SIZE, NULL);
-    printf("Message from TUN in node B [%s]\n", msg->bytes);
-    *((int*)iface->senderContext) = TUNB;
-    return 0;
-}
-
-static uint8_t incomingTunA(struct Message* msg, struct Interface* iface)
-{
-    Assert_true(TUNMessageType_pop(msg, NULL) == Ethernet_TYPE_IP6);
-    Message_shift(msg, -Headers_IP6Header_SIZE, NULL);
-    uint8_t buff[1024];
-    Hex_encode(buff, 1024, msg->bytes, msg->length);
-    printf("Message from TUN in node A [%s] [%d] [%s]\n", msg->bytes, msg->length, buff);
-    *((int*)iface->senderContext) = TUNA;
-    return 0;
-}
 
 struct TwoNodes;
 
@@ -61,11 +39,10 @@ typedef void (RunTest)(struct TwoNodes* ctx);
 
 struct TwoNodes
 {
-    struct Interface tunIfB;
     struct TestFramework* nodeB;
-
-    struct Interface tunIfA;
+    struct Iface tunB;
     struct TestFramework* nodeA;
+    struct Iface tunA;
     int messageFrom;
 
     struct Timeout* checkLinkageTimeout;
@@ -79,6 +56,31 @@ struct TwoNodes
     Identity
 };
 
+#define TUNB 2
+#define TUNA 1
+
+static Iface_DEFUN incomingTunB(struct Message* msg, struct Iface* tunB)
+{
+    struct TwoNodes* tn = Identity_containerOf(tunB, struct TwoNodes, tunB);
+    Assert_true(TUNMessageType_pop(msg, NULL) == Ethernet_TYPE_IP6);
+    Message_shift(msg, -Headers_IP6Header_SIZE, NULL);
+    printf("Message from TUN in node B [%s]\n", msg->bytes);
+    tn->messageFrom = TUNB;
+    return 0;
+}
+
+static Iface_DEFUN incomingTunA(struct Message* msg, struct Iface* tunA)
+{
+    struct TwoNodes* tn = Identity_containerOf(tunA, struct TwoNodes, tunA);
+    Assert_true(TUNMessageType_pop(msg, NULL) == Ethernet_TYPE_IP6);
+    Message_shift(msg, -Headers_IP6Header_SIZE, NULL);
+    uint8_t buff[1024];
+    Hex_encode(buff, 1024, msg->bytes, msg->length);
+    printf("Message from TUN in node A [%s] [%d] [%s]\n", msg->bytes, msg->length, buff);
+    tn->messageFrom = TUNA;
+    return 0;
+}
+
 static void notLinkedYet(struct TwoNodes* ctx)
 {
     uint64_t now = Time_currentTimeMilliseconds(ctx->base);
@@ -91,9 +93,15 @@ static void checkLinkage(void* vTwoNodes)
 {
     struct TwoNodes* ctx = Identity_check((struct TwoNodes*) vTwoNodes);
 
-    if (ctx->nodeA->nodeStore->nodeCount < 1) { notLinkedYet(ctx); return; }
+    if (Pathfinder_getNodeStore(ctx->nodeA->pathfinder)->nodeCount < 1) {
+        notLinkedYet(ctx);
+        return;
+    }
     Log_debug(ctx->logger, "A seems to be linked with B");
-    if (ctx->nodeB->nodeStore->nodeCount < 1) { notLinkedYet(ctx); return; }
+    if (Pathfinder_getNodeStore(ctx->nodeB->pathfinder)->nodeCount < 1) {
+        notLinkedYet(ctx);
+        return;
+    }
     Log_debug(ctx->logger, "B seems to be linked with A");
     Log_debug(ctx->logger, "\n\nSetup Complete\n\n");
 
@@ -129,12 +137,10 @@ static void start(struct Allocator* alloc,
 
     struct TwoNodes* out = Allocator_calloc(alloc, sizeof(struct TwoNodes), 1);
     Identity_set(out);
-    out->tunIfB.allocator = alloc;
-    out->tunIfA.allocator = alloc;
-    out->tunIfB.sendMessage = incomingTunB;
-    out->tunIfA.sendMessage = incomingTunA;
-    out->tunIfB.senderContext = &out->messageFrom;
-    out->tunIfA.senderContext = &out->messageFrom;
+    out->tunB.send = incomingTunB;
+    out->tunA.send = incomingTunA;
+    Iface_plumb(&out->tunB, b->tunIf);
+    Iface_plumb(&out->tunA, a->tunIf);
     out->nodeB = b;
     out->nodeA = a;
     out->logger = logger;
@@ -142,9 +148,6 @@ static void start(struct Allocator* alloc,
     out->base = base;
     out->startTime = Time_currentTimeMilliseconds(base);
     out->runTest = runTest;
-
-    Ducttape_setUserInterface(b->ducttape, &out->tunIfB);
-    Ducttape_setUserInterface(a->ducttape, &out->tunIfA);
 
     Log_debug(a->logger, "Waiting for nodes to link asynchronously...");
 }
@@ -164,18 +167,18 @@ static void sendMessage(struct TwoNodes* tn,
 
     msg = Message_clone(msg, from->alloc);
 
-    struct Interface* fromIf;
+    struct Iface* fromIf;
 
     if (from == tn->nodeA) {
-        fromIf = &tn->tunIfA;
+        fromIf = &tn->tunA;
     } else if (from == tn->nodeB) {
-        fromIf = &tn->tunIfB;
+        fromIf = &tn->tunB;
     } else {
         Assert_true(false);
     }
 
     TUNMessageType_push(msg, Ethernet_TYPE_IP6, NULL);
-    fromIf->receiveMessage(msg, fromIf);
+    Iface_send(fromIf, msg);
 
     if (to == tn->nodeA) {
         Assert_true(tn->messageFrom == TUNA);

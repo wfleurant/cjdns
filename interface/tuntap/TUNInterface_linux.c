@@ -12,11 +12,10 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
+#include "interface/tuntap/TUNInterface.h"
 #include "exception/Except.h"
 #include "memory/Allocator.h"
 #include "util/events/EventBase.h"
-#include "interface/Interface.h"
-#include "interface/tuntap/TUNInterface.h"
 #include "util/events/Pipe.h"
 
 #include <errno.h>
@@ -41,7 +40,7 @@
   #define DEVICE_PATH "/dev/net/tun"
 #endif
 
-struct Interface* TUNInterface_new(const char* interfaceName,
+struct Iface* TUNInterface_new(const char* interfaceName,
                                    char assignedInterfaceName[TUNInterface_IFNAMSIZ],
                                    int isTapMode,
                                    struct EventBase* base,

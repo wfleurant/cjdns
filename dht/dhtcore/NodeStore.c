@@ -332,6 +332,19 @@ static bool isPeer(struct Node_Two* node, struct NodeStore_pvt* store)
         && LabelSplicer_isOneHop(Node_getBestParent(node)->cannonicalLabel);
 }
 
+static void setParentReachAndPath(struct Node_Two* node,
+                                  struct Node_Link* parent,
+                                  uint32_t reach,
+                                  uint64_t path,
+                                  struct NodeStore_pvt* store)
+{
+    uint64_t oldPath = node->address.path;
+    Node_setParentReachAndPath(node, parent, reach, path);
+    if (oldPath != path && store->pub.onBestPathChange) {
+        store->pub.onBestPathChange(store->pub.onBestPathChangeCtx, node);
+    }
+}
+
 static void unreachable(struct Node_Two* node, struct NodeStore_pvt* store)
 {
     struct Node_Link* next = NULL;
@@ -345,7 +358,7 @@ static void unreachable(struct Node_Two* node, struct NodeStore_pvt* store)
         update(bp, -UINT32_MAX, store);
         store->pub.linkedNodes--;
     }
-    Node_setParentReachAndPath(node, NULL, 0, UINT64_MAX);
+    setParentReachAndPath(node, NULL, 0, UINT64_MAX, store);
 }
 
 /** Adds the reach of path A->B to path B->C to get the expected reach of A->C. */
@@ -461,7 +474,7 @@ static int updateBestParentCycle(struct Node_Link* newBestLink,
     }
 
     if (!Node_getBestParent(node)) { store->pub.linkedNodes++; }
-    Node_setParentReachAndPath(node, newBestLink, nextReach, bestPath);
+    setParentReachAndPath(node, newBestLink, nextReach, bestPath, store);
 
     checkNode(node, store);
     return 1;
@@ -1188,9 +1201,13 @@ static struct Node_Two* whichIsWorse(struct Node_Two* one,
                                      struct NodeStore_pvt* store)
 {
     // a peer is nevar worse
-    int peers = isPeer(one, store) - isPeer(two, store);
-    if (peers) {
-        return (peers > 0) ? two : one;
+    int worse = isPeer(one, store) - isPeer(two, store);
+    if (worse) {
+        return (worse > 0) ? two : one;
+    }
+    worse = one->pinned - two->pinned;
+    if (worse) {
+        return (worse > 0) ? two : one;
     }
 
     if (one->address.protocolVersion != two->address.protocolVersion) {
@@ -1360,7 +1377,7 @@ static void destroyNode(struct Node_Two* node, struct NodeStore_pvt* store)
     // This is an optimization:
     if (!Defined(PARANOIA)) {
         store->pub.linkedNodes--;
-        Node_setParentReachAndPath(node, NULL, 0, UINT64_MAX);
+        setParentReachAndPath(node, NULL, 0, UINT64_MAX, store);
     }
 
     link = node->reversePeers;
@@ -1522,8 +1539,9 @@ struct Node_Link* NodeStore_discoverNode(struct NodeStore* nodeStore,
     handleNews(link->child, reach, store);
     freePendingLinks(store);
 
-    while (store->pub.nodeCount - store->pub.peerCount > store->pub.nodeCapacity
-        || store->pub.linkCount > store->pub.linkCapacity)
+    while ((store->pub.nodeCount - store->pub.peerCount - store->pub.pinnedNodes) >
+        store->pub.nodeCapacity
+            || store->pub.linkCount > store->pub.linkCapacity)
     {
         struct Node_Two* worst = getWorstNode(store);
         if (Defined(Log_DEBUG)) {
@@ -1534,6 +1552,13 @@ struct Node_Link* NodeStore_discoverNode(struct NodeStore* nodeStore,
         }
 
         Assert_true(!isPeer(worst, store));
+        //Assert_true(!worst->pinned); // best effort, sometimes we must remove a pinned node.
+        if (Defined(Log_INFO) && worst->pinned) {
+            uint8_t worstAddr[60];
+            Address_print(worstAddr, &worst->address);
+            Log_debug(store->logger, "store full, worst node pinned: [%s] nodes [%d] links [%d]",
+                      worstAddr, store->pub.nodeCount, store->pub.linkCount);
+        }
 
         if (link && (worst == link->parent || worst == link->child)) { link = NULL; }
 
@@ -1953,6 +1978,9 @@ struct NodeList* NodeStore_getClosestNodes(struct NodeStore* nodeStore,
 
     struct Node_Two* next = Identity_ncheck(RB_NFIND(NodeRBTree, &store->nodeTree, &fakeNode));
     if (!next) {
+        next = Identity_ncheck(RB_MAX(NodeRBTree, &store->nodeTree));
+    }
+    if (!next) {
         out->size = 0;
         return out;
     }
@@ -2309,4 +2337,21 @@ uint64_t NodeStore_timeSinceLastPing(struct NodeStore* nodeStore, struct Node_Tw
         link = Node_getBestParent(link->parent);
     }
     return now - lastSeen;
+}
+
+void NodeStore_unpinNode(struct NodeStore* nodeStore, struct Node_Two* node)
+{
+    struct NodeStore_pvt* store = Identity_check((struct NodeStore_pvt*)nodeStore);
+    if (!node->pinned) { return; }
+    store->pub.pinnedNodes--;
+    node->pinned = false;
+    Assert_true(store->pub.pinnedNodes >= 0);
+}
+
+void NodeStore_pinNode(struct NodeStore* nodeStore, struct Node_Two* node)
+{
+    struct NodeStore_pvt* store = Identity_check((struct NodeStore_pvt*)nodeStore);
+    if (node->pinned) { return; }
+    store->pub.pinnedNodes++;
+    node->pinned = true;
 }

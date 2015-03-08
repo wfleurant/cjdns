@@ -37,6 +37,11 @@ struct Message
     /** Amount of bytes of storage space available in the message. */
     int32_t capacity;
 
+    #ifdef PARANOIA
+        /** This is used inside of Iface.h to support Iface_next() */
+        struct Iface* currentIface;
+    #endif
+
     /** The allocator which allocated space for this message. */
     struct Allocator* alloc;
 };
@@ -55,7 +60,7 @@ static inline struct Message* Message_new(uint32_t messageLength,
                                           struct Allocator* alloc)
 {
     uint8_t* buff = Allocator_malloc(alloc, messageLength + amountOfPadding);
-    struct Message* out = Allocator_malloc(alloc, sizeof(struct Message));
+    struct Message* out = Allocator_calloc(alloc, sizeof(struct Message), 1);
     out->bytes = &buff[amountOfPadding];
     out->length = out->capacity = messageLength;
     out->padding = amountOfPadding;

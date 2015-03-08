@@ -15,7 +15,7 @@
 #ifndef TAPWrapper_H
 #define TAPWrapper_H
 
-#include "interface/Interface.h"
+#include "interface/Iface.h"
 #include "memory/Allocator.h"
 #include "util/log/Log.h"
 #include "wire/Ethernet.h"
@@ -24,7 +24,7 @@ Linker_require("interface/tuntap/TAPWrapper.c")
 
 struct TAPWrapper
 {
-    struct Interface generic;
+    struct Iface internal;
 
     /** This is the peer's MAC address (zero before initialization). */
     uint8_t peerAddress[Ethernet_ADDRLEN];
@@ -36,7 +36,7 @@ struct TAPWrapper
  */
 #define TAPWrapper_LOCAL_MAC "\xfc\x00\x00\x00\x00\x00"
 
-struct TAPWrapper* TAPWrapper_new(struct Interface* external,
+struct TAPWrapper* TAPWrapper_new(struct Iface* external,
                                   struct Log* log,
                                   struct Allocator* alloc);
 

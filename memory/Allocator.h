@@ -145,6 +145,7 @@ struct Allocator_Allocation* Allocator_getAllocation(struct Allocator* alloc, in
  * @return a pointer to the newly allocated memory.
  * @see malloc()
  */
+Gcc_ALLOC_SIZE(2)
 void* Allocator__malloc(struct Allocator* allocator,
                         unsigned long length,
                         const char* fileName,
@@ -163,6 +164,7 @@ void* Allocator__malloc(struct Allocator* allocator,
  * @return a pointer to the newly allocated memory.
  * @see calloc()
  */
+Gcc_ALLOC_SIZE(2,3)
 void* Allocator__calloc(struct Allocator* alloc,
                         unsigned long length,
                         unsigned long count,
@@ -184,6 +186,7 @@ void* Allocator__calloc(struct Allocator* alloc,
  *             without freeing the entire allocator.
  * @return a pointer to the newly allocated memory.
  */
+Gcc_ALLOC_SIZE(3)
 void* Allocator__realloc(struct Allocator* allocator,
                          const void* original,
                          unsigned long size,
@@ -202,6 +205,7 @@ void* Allocator__realloc(struct Allocator* allocator,
  *                the size of the new allocation will be sizeof(*content).
  * @return a pointer to the newly allocated memory.
  */
+Gcc_ALLOC_SIZE(3)
 void* Allocator__clone(struct Allocator* allocator,
                        const void* toClone,
                        unsigned long length,
@@ -225,6 +229,10 @@ struct Allocator* Allocator__child(struct Allocator* alloc, const char* fileName
  * If it has been adopted using Allocator_adopt() then the freeing of the allocator will be deferred
  * until the allocator returned by Allocator_adopt() has also been freed.
  * Any allocator which has no surviving parent allocator will be implicitly freed.
+ * NOTE: This does not do what it seems to do, it does not necessarily *free* the allocator, it
+ *       only promises to cut the link to the allocator's normal parent, if the allocator has been
+ *       adopter then the adopted parent becomes the normal parent and then the allocator is not
+ *       freed even though you asked to free it!
  *
  * @param alloc the allocator to disconnect from it's parent.
  */
@@ -233,6 +241,7 @@ void Allocator__free(struct Allocator* alloc, const char* file, int line);
 
 /**
  * Add a function to be called when the allocator is freed.
+ * There is no guarantee of which order the onFree jobs will be executed.
  *
  * @param alloc the memory allocator.
  * @param callback the function to call.
@@ -340,6 +349,7 @@ void Allocator_snapshot(struct Allocator* alloc, int includeAllocations);
 #ifndef Allocator_Provider_CONTEXT_TYPE
     #define Allocator_Provider_CONTEXT_TYPE void
 #endif
+Gcc_ALLOC_SIZE(3)
 typedef void* (* Allocator_Provider)(Allocator_Provider_CONTEXT_TYPE* ctx,
                                      struct Allocator_Allocation* original,
                                      unsigned long size,

@@ -44,7 +44,7 @@ Builder.configure({
     crossCompiling: process.env['CROSS'] !== undefined,
     gcc:            GCC,
     tempDir:        '/tmp',
-    optimizeLevel:  '-O2',
+    optimizeLevel:  '-O3',
     logLevel:       process.env['Log_LEVEL'] || 'DEBUG'
 }, function (builder, waitFor) {
     builder.config.cflags.push(
@@ -56,9 +56,7 @@ Builder.configure({
         '-pedantic',
         '-D', builder.config.systemName + '=1',
         '-Wno-unused-parameter',
-        '-Wno-unused-result',
-
-        '-D', 'HAS_BUILTIN_CONSTANT_P',
+        '-fomit-frame-pointer',
 
         '-D', 'Log_' + builder.config.logLevel,
 
@@ -70,7 +68,7 @@ Builder.configure({
         // v4x8 = 256 peers max, variable width, 4, or 8 bits plus 1 bit prefix
         '-D', 'NumberCompress_TYPE=v3x5x8',
 
-        // disable for speed, enable for safety
+        // enable for safety (don't worry about speed, profiling shows they add ~nothing)
         '-D', 'Identity_CHECK=1',
         '-D', 'Allocator_USE_CANARIES=1',
         '-D', 'PARANOIA=1'
@@ -114,14 +112,27 @@ Builder.configure({
 
             // lots of places where depending on preprocessor conditions, a statement might be
             // a case of if (1 == 1)
-            '-Wno-tautological-compare'
+            '-Wno-tautological-compare',
+
+            '-Wno-error'
         );
+        builder.config.cflags.slice(builder.config.cflags.indexOf('-Werror'), 1);
     }
 
     // Install any user-defined CFLAGS. Necessary if you are messing about with building cnacl
-    // with NEON on the BBB
+    // with NEON on the BBB, or want to set -Os (OpenWrt)
     if (CFLAGS) {
-        [].push.apply(builder.config.cflags, CFLAGS.split(' '));
+        var cflags = CFLAGS.split(' ');
+        cflags.forEach(function(flag) {
+             if (/^\-O[^2s]$/.test(flag)) {
+                console.log("Skipping " + flag + ", assuming " +
+                            builder.config.optimizeLevel + " instead.");
+            } else if (/^\-O[2s]$/.test(flag)) {
+                builder.config.optimizeLevel = flag;
+            } else {
+                [].push.apply(builder.config.cflags, cflags);
+            }
+        });
     }
 
     // We also need to pass various architecture/floating point flags to GCC when invoked as
@@ -151,10 +162,21 @@ Builder.configure({
     });
 
     var uclibc = process.env['UCLIBC'] == '1';
-    var libssp = process.env['SSP_SUPPORT'] == 'y';
-    if (builder.config.systemName == 'win32') {
+    var libssp;
+    switch (process.env['SSP_SUPPORT']) {
+        case 'y':
+        case '1': libssp = true; break;
+        case 'n':
+        case '' :
+        case '0': libssp = false; break;
+        case undefined: break;
+        default: throw new Error();
+    }
+    if (libssp === false) {
+        console.log("Stack Smashing Protection (security feature) is disabled");
+    } else if (builder.config.systemName == 'win32') {
         builder.config.libs.push('-lssp');
-    } else if ((!uclibc && builder.config.systemName !== 'sunos') || libssp) {
+    } else if ((!uclibc && builder.config.systemName !== 'sunos') || libssp === true) {
         builder.config.cflags.push(
             // Broken GCC patch makes -fstack-protector-all not work
             // workaround is to give -fno-stack-protector first.

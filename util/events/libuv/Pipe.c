@@ -14,7 +14,6 @@
  */
 #include "util/events/libuv/UvWrapper.h"
 #include "memory/Allocator.h"
-#include "interface/Interface.h"
 #include "util/events/Pipe.h"
 #include "util/events/libuv/EventBase_pvt.h"
 #include "util/log/Log.h"
@@ -104,12 +103,12 @@ static uint8_t sendMessage2(struct Pipe_WriteRequest_pvt* req)
     return Error_NONE;
 }
 
-static uint8_t sendMessage(struct Message* m, struct Interface* iface)
+static Iface_DEFUN sendMessage(struct Message* m, struct Iface* iface)
 {
     struct Pipe_pvt* pipe = Identity_check((struct Pipe_pvt*) iface);
 
     if (pipe->queueLen > 50000) {
-        return Error_LINK_LIMIT_EXCEEDED;
+        return 0;
     }
 
     // This allocator will hold the message allocator in existance after it is freed.
@@ -188,15 +187,15 @@ static void incoming(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf)
         // This is common.
         //Log_debug(pipe->pub.logger, "Pipe 0 length read [%s]", pipe->pub.fullName);
 
-    } else if (pipe->pub.iface.receiveMessage) {
+    } else {
         Assert_true(alloc);
-        struct Message* m = Allocator_malloc(alloc, sizeof(struct Message));
+        struct Message* m = Allocator_calloc(alloc, sizeof(struct Message), 1);
         m->length = nread;
         m->padding = Pipe_PADDING_AMOUNT;
         m->capacity = buf->len;
         m->bytes = (uint8_t*)buf->base;
         m->alloc = alloc;
-        Interface_receiveMessage(&pipe->pub.iface, m);
+        Iface_send(&pipe->pub.iface, m);
     }
 
     if (alloc) {
@@ -349,8 +348,7 @@ static struct Pipe_pvt* newPipe(struct EventBase* eb,
     struct Pipe_pvt* out = Allocator_clone(alloc, (&(struct Pipe_pvt) {
         .pub = {
             .iface = {
-                .sendMessage = sendMessage,
-                .allocator = userAlloc
+                .send = sendMessage
             },
             .fullName = cname,
             .name = &cname[sizeof(PREFIX) - 1],

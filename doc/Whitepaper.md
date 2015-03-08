@@ -54,7 +54,7 @@ has become a science where students receive degrees and certificates for knowing
 the meanings of the plethora of knobs and switches, it has also become, like the
 tuning of the race car, an art, passed from master to apprentice and shared on
 mailing lists. Suffice to say, the bar of entry into the ISP realm is too high.
-Users, particularly in the ad-hoc wireless network arena have observed the high
+Users, particularly in the ad-hoc wireless network arena, have observed the high
 bar of entry into traditional routing and have developed a menu of alternative,
 self-configuring protocols such as [OSLR], [HSLS], and [BATMAN].
 
@@ -150,8 +150,8 @@ infected computers are incentivized to save money rather than purchasing a
 product or service to rid their computer of the infection. While there are
 solutions such as egress filtering which decrease the problem, ISPs are
 incentivized to implement as little security as possible because they are not
-directly affected. Denial of service whether by packet flooding or by faux legal
-action benefits the attacker who is able to hide the truth or victimize service
+directly affected. Denial of service, whether by packet flooding or by faux legal
+action, benefits the attacker who is able to hide the truth or victimize service
 providers as well as organizations who make it their business to provide DoS
 related services. The victim who all too often publishes information for no
 other reason than satisfaction of telling the truth, is the only party harmed
@@ -364,7 +364,7 @@ routeAC =        000000000000000000000000000000000011010101010001110111010101100
 
 routeAB =        0000000000000000000000000000000000000000000001011101110101011001
 
-Trimmed to the same langth:
+Trimmed to the same length:
 
 routeAC'         0000000000000000000000000000000000000000000000011101110101011001
 routeAB'         0000000000000000000000000000000000000000000000011101110101011001
@@ -902,7 +902,7 @@ based on the source IPv6 address. The IPv6 header is then moved up to meet the
 content (into the place where the CryptoAuth header had been) and the final
 packet is written out to the TUN device.
 
-![illustration](https://github.com/cjdelisle/cjdns/raw/master/doc/flowchart.png)
+![illustration](https://github.com/cjdelisle/cjdns/raw/master/doc/CjdnsModules.png)
 
 
 [OSLR]: http://tools.ietf.org/html/rfc3626

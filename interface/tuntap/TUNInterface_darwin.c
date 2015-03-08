@@ -12,9 +12,8 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#include "exception/Except.h"
-#include "interface/Interface.h"
 #include "interface/tuntap/TUNInterface.h"
+#include "exception/Except.h"
 #include "interface/tuntap/BSDMessageTypeWrapper.h"
 #include "util/AddrTools.h"
 #include "util/events/Pipe.h"
@@ -41,7 +40,7 @@
 #define APPLE_UTUN_CONTROL "com.apple.net.utun_control"
 #define UTUN_OPT_IFNAME 2
 
-struct Interface* TUNInterface_new(const char* interfaceName,
+struct Iface* TUNInterface_new(const char* interfaceName,
                                    char assignedInterfaceName[TUNInterface_IFNAMSIZ],
                                    int isTapMode,
                                    struct EventBase* base,
@@ -114,5 +113,7 @@ struct Interface* TUNInterface_new(const char* interfaceName,
 
     struct Pipe* p = Pipe_forFiles(tunFd, tunFd, base, eh, alloc);
 
-    return BSDMessageTypeWrapper_new(&p->iface, logger);
+    struct BSDMessageTypeWrapper* bmtw = BSDMessageTypeWrapper_new(alloc, logger);
+    Iface_plumb(&p->iface, &bmtw->wireSide);
+    return &bmtw->inside;
 }

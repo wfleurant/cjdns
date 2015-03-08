@@ -15,7 +15,7 @@
 #ifndef TestFramework_H
 #define TestFramework_H
 
-#include "net/Ducttape.h"
+#include "net/NetCore.h"
 #include "util/Linker.h"
 Linker_require("test/TestFramework.c")
 
@@ -25,13 +25,9 @@ struct TestFramework
     struct Random* rand;
     struct EventBase* eventBase;
     struct Log* logger;
-    struct SwitchCore* switchCore;
-    struct Ducttape* ducttape;
-    struct CryptoAuth* cryptoAuth;
-    struct RouterModule* router;
-    struct SwitchPinger* switchPinger;
-    struct InterfaceController* ifController;
-    struct NodeStore* nodeStore;
+    struct Pathfinder* pathfinder;
+    struct Iface* tunIf;
+    struct NetCore* nc;
 
     /** The last message which this node sent. */
     struct Message* lastMsg;

@@ -15,17 +15,17 @@
 #ifndef TAPInterface_H
 #define TAPInterface_H
 
+#include "interface/Iface.h"
 #include "exception/Except.h"
 #include "memory/Allocator.h"
 #include "util/log/Log.h"
 #include "util/events/EventBase.h"
-#include "interface/Interface.h"
 #include "util/Linker.h"
 Linker_require("interface/tuntap/windows/TAPInterface.c")
 
 struct TAPInterface
 {
-    struct Interface generic;
+    struct Iface generic;
     char* assignedName;
 };
 
