@@ -334,7 +334,7 @@ Builder.configure({
                     'CXX=' + builder.config.gcc,
                     'V=1'
                 ];
-                var cflags = [builder.config.optimizeLevel];
+                var cflags = [builder.config.optimizeLevel, '-DNO_EMFILE_TRICK=1'];
 
                 if (!(/darwin|win32/i.test(builder.config.systemName))) {
                     cflags.push('-fPIC');
@@ -368,7 +368,7 @@ Builder.configure({
 
 }).build(function (builder, waitFor) {
 
-    builder.buildExecutable('admin/angel/cjdroute2.c', 'cjdroute');
+    builder.buildExecutable('client/cjdroute2.c', 'cjdroute');
 
     builder.buildExecutable('contrib/c/publictoip6.c');
     builder.buildExecutable('contrib/c/privatetopublic.c');

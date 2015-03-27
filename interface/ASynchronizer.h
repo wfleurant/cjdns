@@ -12,28 +12,21 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#ifndef AngelInit_H
-#define AngelInit_H
+#ifndef ASynchronizer_H
+#define ASynchronizer_H
 
+#include "interface/Iface.h"
+#include "util/events/EventBase.h"
+#include "memory/Allocator.h"
 #include "util/Linker.h"
-Linker_require("admin/angel/AngelInit.c")
+Linker_require("interface/ASynchronizer.c")
 
-/**
- * Input:
- * {
- *   "admin": {
- *     "core": "/path/to/core/binary",
- *     "bind": "127.0.0.1:12345",
- *     "pass": "12345adminsocketpassword",
- *     "user": "setUidToThisUser"
- *   }
- * }
- * for example:
- * d5:admind4:core30:./build/admin/angel/cjdns-core4:bind15:127.0.0.1:123454:pass4:abcdee
- *
-/home/user/wrk/cjdns/build/admin/angel/cjdns-core
- * "user" is optional, if set the angel will setuid() that user's uid.
- */
-int AngelInit_main(int argc, char** argv);
+struct ASynchronizer
+{
+    struct Iface ifA;
+    struct Iface ifB;
+};
+
+struct ASynchronizer* ASynchronizer_new(struct Allocator* alloc, struct EventBase* base);
 
 #endif

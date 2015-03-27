@@ -12,11 +12,10 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#include "admin/AdminClient.h"
-#include "admin/angel/AngelInit.h"
+#include "client/AdminClient.h"
 #include "admin/angel/Core.h"
 #include "admin/angel/InterfaceWaiter.h"
-#include "admin/Configurator.h"
+#include "client/Configurator.h"
 #include "benc/Dict.h"
 #include "benc/Int.h"
 #include "benc/List.h"
@@ -39,6 +38,7 @@
 #include "util/Assert.h"
 #include "util/Base32.h"
 #include "util/CString.h"
+#include "util/events/UDPAddrIface.h"
 #include "util/events/Time.h"
 #include "util/events/EventBase.h"
 #include "util/events/Pipe.h"
@@ -289,18 +289,59 @@ static int genconf(struct Random* rand, bool eth)
            "            ]\n"
            "        }\n"
            "    },\n"
-           "\n"
-           "    // Dropping permissions.\n"
+           "\n");
+    printf("    // Dropping permissions.\n"
+           "    // In the event of a serious security exploit in cjdns, leak of confidential\n"
+           "    // network traffic and/or keys is highly likely but the following rules are\n"
+           "    // designed to prevent the attack from spreading to the system on which cjdns\n"
+           "    // is running.\n"
+           "    // Counter-intuitively, cjdns is *more* secure if it is started as root because\n"
+           "    // non-root users do not have permission to use chroot or change usernames,\n"
+           "    // limiting the effectiveness of the mitigations herein.\n"
            "    \"security\":\n"
            "    [\n"
-           "        // Change the user id to this user after starting up and getting resources.\n"
-           "        // exemptAngel exempts the Angel process from setting userId, the Angel is\n"
-           "        // a small isolated piece of code which exists outside of the core's strict\n"
-           "        // sandbox but does not handle network traffic.\n"
-           "        // This must be enabled for IpTunnel to automatically set IP addresses\n"
-           "        // for the TUN device.\n"
-           "        { \"setuser\": \"nobody\", \"exemptAngel\": 1 }\n"
-           "     ],\n"
+           "        // Change the user id to sandbox the cjdns process after it starts.\n"
+           "        // If keepNetAdmin is set to 0, IPTunnel will be unable to set IP addresses\n"
+           "        // and ETHInterface will be unable to hot-add new interfaces\n"
+           "        // Use { \"setuser\": 0 } to disable.\n"
+           "        // Default: enabled with keepNetAdmin\n"
+           "        { \"setuser\": \"nobody\", \"keepNetAdmin\": 1 },\n"
+           "\n"
+           "        // Chroot changes the filesystem root directory which cjdns sees, blocking it\n"
+           "        // from accessing files outside of the chroot sandbox, if the user does not\n"
+           "        // have permission to use chroot(), this will fail quietly.\n"
+           "        // Use { \"chroot\": 0 } to disable.\n"
+           "        // Default: enabled (using \"/var/run\")\n"
+           "        { \"chroot\": \"/var/run/\" },\n"
+           "\n"
+           "        // Nofiles is a deprecated security feature which prevents cjdns from opening\n"
+           "        // any files at all, using this will block setting of IP addresses and\n"
+           "        // hot-adding ETHInterface devices but for users who do not need this, it\n"
+           "        // provides a formidable sandbox.\n"
+           "        // Default: disabled\n"
+           "        { \"nofiles\": 0 },\n"
+           "\n"
+           "        // Noforks will prevent cjdns from spawning any new processes or threads,\n"
+           "        // this prevents many types of exploits from attacking the wider system.\n"
+           "        // Default: enabled\n"
+           "        { \"noforks\": 1 },\n"
+           "\n"
+           "        // Seccomp is the most advanced sandboxing feature in cjdns, it uses\n"
+           "        // SECCOMP_BPF to filter the system calls which cjdns is able to make on a\n"
+           "        // linux system, strictly limiting it's access to the outside world\n"
+           "        // This will fail quietly on any non-linux system\n"
+           "        // Default: enabled\n"
+           "        { \"seccomp\": 1 },\n"
+           "\n"
+           "        // The client sets up the core using a sequence of RPC calls, the responses\n"
+           "        // to these calls are verified but in the event that the client crashes\n"
+           "        // setup of the core completes, it could leave the core in an insecure state\n"
+           "        // This call constitutes the client telling the core that the security rules\n"
+           "        // have been fully applied and the core may run. Without it, the core will\n"
+           "        // exit within a few seconds with return code 232.\n"
+           "        // Default: enabled\n"
+           "        { \"setupComplete\": 1 }\n"
+           "    ],\n"
            "\n"
            "    // Logging\n"
            "    \"logging\":\n"
@@ -375,8 +416,10 @@ static void checkRunningInstance(struct Allocator* allocator,
         Except_throw(eh, "Unable to parse [%s] as an ip address port, eg: 127.0.0.1:11234",
                      addr->bytes);
     }
+
+    struct UDPAddrIface* udp = UDPAddrIface_new(base, NULL, alloc, NULL, logger);
     struct AdminClient* adminClient =
-        AdminClient_new(&pingAddrStorage.addr, password, base, logger, alloc);
+        AdminClient_new(&udp->generic, &pingAddrStorage.addr, password, base, logger, alloc);
 
     // 100 milliseconds is plenty to wait for a process to respond on the same machine.
     adminClient->millisecondsToWait = 100;
@@ -411,11 +454,7 @@ int main(int argc, char** argv)
         fprintf(stderr, "Log_LEVEL = KEYS, EXPECT TO SEE PRIVATE KEYS IN YOUR LOGS!\n");
     #endif
 
-    if (argc < 2) {
-        // Fall through.
-    } else if (!CString_strcmp("angel", argv[1])) {
-        return AngelInit_main(argc, argv);
-    } else if (!CString_strcmp("core", argv[1])) {
+    if (argc > 1 && (!CString_strcmp("angel", argv[1]) || !CString_strcmp("core", argv[1]))) {
         return Core_main(argc, argv);
     }
 
@@ -529,14 +568,15 @@ int main(int argc, char** argv)
     checkRunningInstance(allocator, eventBase, adminBind, adminPass, logger, eh);
 
     // --------------------- Setup Pipes to Angel --------------------- //
-    char angelPipeName[64] = "client-angel-";
-    Random_base32(rand, (uint8_t*)angelPipeName+13, 31);
+    struct Allocator* corePipeAlloc = Allocator_child(allocator);
+    char corePipeName[64] = "client-core-";
+    Random_base32(rand, (uint8_t*)corePipeName+CString_strlen(corePipeName), 31);
     Assert_ifParanoid(EventBase_eventCount(eventBase) == 0);
-    struct Pipe* angelPipe = Pipe_named(angelPipeName, eventBase, eh, allocator);
+    struct Pipe* corePipe = Pipe_named(corePipeName, eventBase, eh, corePipeAlloc);
     Assert_ifParanoid(EventBase_eventCount(eventBase) == 2);
-    angelPipe->logger = logger;
+    corePipe->logger = logger;
 
-    char* args[] = { "angel", angelPipeName, NULL };
+    char* args[] = { "core", corePipeName, NULL };
 
     // --------------------- Spawn Angel --------------------- //
     String* privateKey = Dict_getString(&config, String_CONST("privateKey"));
@@ -551,57 +591,42 @@ int main(int argc, char** argv)
     if (!privateKey) {
         Except_throw(eh, "Need to specify privateKey.");
     }
-    Log_info(logger, "Forking angel to background.");
     Process_spawn(corePath, args, eventBase, allocator);
 
-    // --------------------- Get user for angel to setuid() ---------------------- //
-    String* securityUser = NULL;
-    List* securityConf = Dict_getList(&config, String_CONST("security"));
-    for (int i = 0; securityConf && i < List_size(securityConf); i++) {
-        securityUser = Dict_getString(List_getDict(securityConf, i), String_CONST("setuser"));
-        if (securityUser) {
-            int64_t* ea = Dict_getInt(List_getDict(securityConf, i), String_CONST("exemptAngel"));
-            if (ea && *ea) {
-                securityUser = NULL;
-            }
-            break;
-        }
-    }
-
-    // --------------------- Pre-Configure Angel ------------------------- //
+    // --------------------- Pre-Configure Core ------------------------- //
     Dict* preConf = Dict_new(allocator);
     Dict* adminPreConf = Dict_new(allocator);
     Dict_putDict(preConf, String_CONST("admin"), adminPreConf, allocator);
-    Dict_putString(adminPreConf, String_CONST("core"), String_new(corePath, allocator), allocator);
     Dict_putString(preConf, String_CONST("privateKey"), privateKey, allocator);
     Dict_putString(adminPreConf, String_CONST("bind"), adminBind, allocator);
     Dict_putString(adminPreConf, String_CONST("pass"), adminPass, allocator);
-    if (securityUser) {
-        Dict_putString(adminPreConf, String_CONST("user"), securityUser, allocator);
-    }
     Dict* logging = Dict_getDict(&config, String_CONST("logging"));
     if (logging) {
         Dict_putDict(preConf, String_CONST("logging"), logging, allocator);
     }
 
-    struct Message* toAngelMsg = Message_new(0, 1024, allocator);
-    BencMessageWriter_write(preConf, toAngelMsg, eh);
-    Iface_CALL(angelPipe->iface.send, toAngelMsg, &angelPipe->iface);
+    struct Message* toCoreMsg = Message_new(0, 1024, allocator);
+    BencMessageWriter_write(preConf, toCoreMsg, eh);
+    Iface_CALL(corePipe->iface.send, toCoreMsg, &corePipe->iface);
 
-    Log_debug(logger, "Sent [%d] bytes to angel process", toAngelMsg->length);
+    Log_debug(logger, "Sent [%d] bytes to core", toCoreMsg->length);
 
-    // --------------------- Get Response from Angel --------------------- //
+    // --------------------- Get Response from Core --------------------- //
 
-    struct Message* fromAngelMsg =
-        InterfaceWaiter_waitForData(&angelPipe->iface, eventBase, allocator, eh);
-    Dict* responseFromAngel = BencMessageReader_read(fromAngelMsg, allocator, eh);
+    struct Message* fromCoreMsg =
+        InterfaceWaiter_waitForData(&corePipe->iface, eventBase, allocator, eh);
+    Dict* responseFromCore = BencMessageReader_read(fromCoreMsg, allocator, eh);
+
+    // --------------------- Close the Core Pipe --------------------- //
+    Allocator_free(corePipeAlloc);
+    corePipe = NULL;
 
     // --------------------- Get Admin Addr/Port/Passwd --------------------- //
-    Dict* responseFromAngelAdmin = Dict_getDict(responseFromAngel, String_CONST("admin"));
-    adminBind = Dict_getString(responseFromAngelAdmin, String_CONST("bind"));
+    Dict* responseFromCoreAdmin = Dict_getDict(responseFromCore, String_CONST("admin"));
+    adminBind = Dict_getString(responseFromCoreAdmin, String_CONST("bind"));
 
     if (!adminBind) {
-        Except_throw(eh, "didn't get address and port back from angel");
+        Except_throw(eh, "didn't get address and port back from core");
     }
     struct Sockaddr_storage adminAddr;
     if (Sockaddr_parse(adminBind->bytes, &adminAddr)) {
@@ -609,8 +634,7 @@ int main(int argc, char** argv)
                      adminBind->bytes);
     }
 
-    // sanity check, Pipe_named() creates 2 events, see above.
-    Assert_ifParanoid(EventBase_eventCount(eventBase) == 2);
+    Assert_ifParanoid(EventBase_eventCount(eventBase) == 1);
 
     // --------------------- Configuration ------------------------- //
     Configurator_config(&config,
@@ -624,9 +648,14 @@ int main(int argc, char** argv)
 
     int64_t* noBackground = Dict_getInt(&config, String_CONST("noBackground"));
     if (forceNoBackground || (noBackground && *noBackground)) {
+        Log_debug(logger, "Keeping cjdns client alive because %s",
+            (forceNoBackground) ? "--nobg was specified on the command line"
+                                : "noBackground was set in the configuration");
         EventBase_beginLoop(eventBase);
     }
 
+    // Freeing this allocator here causes the core to be terminated in the epoll syscall.
     //Allocator_free(allocator);
+
     return 0;
 }

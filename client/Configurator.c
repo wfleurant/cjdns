@@ -12,14 +12,15 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#include "admin/AdminClient.h"
-#include "admin/Configurator.h"
+#include "client/AdminClient.h"
+#include "client/Configurator.h"
 #include "benc/String.h"
 #include "benc/Dict.h"
 #include "benc/Int.h"
 #include "benc/List.h"
 #include "memory/Allocator.h"
 #include "util/events/Event.h"
+#include "util/events/UDPAddrIface.h"
 #include "util/Bits.h"
 #include "util/log/Log.h"
 #include "util/platform/Sockaddr.h"
@@ -166,44 +167,6 @@ static void authorizedPasswords(List* list, struct Context* ctx)
         }
         rpcCall(String_CONST("AuthorizedPasswords_add"), args, ctx, child);
         Allocator_free(child);
-    }
-}
-
-static void dns(Dict* dns, struct Context* ctx, struct Except* eh)
-{
-    List* servers = Dict_getList(dns, String_CONST("servers"));
-    if (servers) {
-        int count = List_size(servers);
-        for (int i = 0; i < count; i++) {
-            String* server = List_getString(servers, i);
-            if (!server) {
-                Except_throw(eh, "dns.servers[%d] is not a string", i);
-            }
-            Dict* d = Dict_new(ctx->alloc);
-            Dict_putString(d, String_CONST("addr"), server, ctx->alloc);
-            rpcCall(String_CONST("RainflyClient_addServer"), d, ctx, ctx->alloc);
-        }
-    }
-
-    List* keys = Dict_getList(dns, String_CONST("keys"));
-    if (keys) {
-        int count = List_size(keys);
-        for (int i = 0; i < count; i++) {
-            String* key = List_getString(keys, i);
-            if (!key) {
-                Except_throw(eh, "dns.keys[%d] is not a string", i);
-            }
-            Dict* d = Dict_new(ctx->alloc);
-            Dict_putString(d, String_CONST("ident"), key, ctx->alloc);
-            rpcCall(String_CONST("RainflyClient_addKey"), d, ctx, ctx->alloc);
-        }
-    }
-
-    int64_t* minSigs = Dict_getInt(dns, String_CONST("minSignatures"));
-    if (minSigs) {
-        Dict* d = Dict_new(ctx->alloc);
-        Dict_putInt(d, String_CONST("count"), *minSigs, ctx->alloc);
-        rpcCall(String_CONST("RainflyClient_minSignatures"), d, ctx, ctx->alloc);
     }
 }
 
@@ -479,14 +442,111 @@ static void ethInterface(Dict* config, struct Context* ctx)
     }
 }
 
-static void security(struct Allocator* tempAlloc, struct Context* ctx)
+static void security(struct Allocator* tempAlloc, List* conf, struct Log* log, struct Context* ctx)
 {
-    Dict* d = Dict_new(tempAlloc);
-    Dict_putString(d, String_CONST("user"), String_CONST("nobody"), tempAlloc);
-    // it's ok if this fails
-    rpcCall0(String_CONST("Security_setUser"), d, ctx, tempAlloc, NULL, false);
-    d = Dict_new(tempAlloc);
-    rpcCall(String_CONST("Security_dropPermissions"), d, ctx, tempAlloc);
+    int seccomp = 1;
+    int nofiles = 0;
+    int noforks = 1;
+    int chroot = 1;
+    int setupComplete = 1;
+    int setuser = 1;
+
+    int uid = -1;
+    int keepNetAdmin = 1;
+
+    do {
+        Dict* d = Dict_new(tempAlloc);
+        Dict_putString(d, String_CONST("user"), String_CONST("nobody"), tempAlloc);
+        Dict* ret = NULL;
+        rpcCall0(String_CONST("Security_getUser"), d, ctx, tempAlloc, &ret, true);
+        uid = *Dict_getInt(ret, String_CONST("uid"));
+    } while (0);
+
+    for (int i = 0; conf && i < List_size(conf); i++) {
+        Dict* elem = List_getDict(conf, i);
+        String* s;
+        if (elem && (s = Dict_getString(elem, String_CONST("setuser")))) {
+            if (setuser == 0) { continue; }
+            Dict* d = Dict_new(tempAlloc);
+            Dict_putString(d, String_CONST("user"), s, tempAlloc);
+            Dict* ret = NULL;
+            rpcCall0(String_CONST("Security_getUser"), d, ctx, tempAlloc, &ret, true);
+            uid = *Dict_getInt(ret, String_CONST("uid"));
+            int64_t* nka = Dict_getInt(elem, String_CONST("keepNetAdmin"));
+            int64_t* exemptAngel = Dict_getInt(elem, String_CONST("exemptAngel"));
+            keepNetAdmin = ((nka) ? *nka : ((exemptAngel) ? *exemptAngel : 0));
+            continue;
+        }
+        if (elem && (s = Dict_getString(elem, String_CONST("chroot")))) {
+            Log_debug(log, "Security_chroot(%s)", s->bytes);
+            Dict* d = Dict_new(tempAlloc);
+            Dict_putString(d, String_CONST("root"), s, tempAlloc);
+            rpcCall0(String_CONST("Security_chroot"), d, ctx, tempAlloc, NULL, false);
+            chroot = 0;
+            continue;
+        }
+        uint64_t* x;
+        if (elem && (x = Dict_getInt(elem, String_CONST("nofiles")))) {
+            if (!*x) { continue; }
+            nofiles = 1;
+            continue;
+        }
+        if (elem && (x = Dict_getInt(elem, String_CONST("setuser")))) {
+            if (!*x) { setuser = 0; }
+            continue;
+        }
+        if (elem && (x = Dict_getInt(elem, String_CONST("seccomp")))) {
+            if (!*x) { seccomp = 0; }
+            continue;
+        }
+        if (elem && (x = Dict_getInt(elem, String_CONST("noforks")))) {
+            if (!*x) { noforks = 0; }
+            continue;
+        }
+        if (elem && (x = Dict_getInt(elem, String_CONST("chroot")))) {
+            if (!*x) { chroot = 0; }
+            continue;
+        }
+        if (elem && (x = Dict_getInt(elem, String_CONST("setupComplete")))) {
+            if (!*x) { setupComplete = 0; }
+            continue;
+        }
+        Log_info(ctx->logger, "Unrecognized entry in security at index [%d]", i);
+    }
+
+    if (chroot) {
+        Log_debug(log, "Security_chroot(/var/run)");
+        Dict* d = Dict_new(tempAlloc);
+        Dict_putString(d, String_CONST("root"), String_CONST("/var/run/"), tempAlloc);
+        rpcCall0(String_CONST("Security_chroot"), d, ctx, tempAlloc, NULL, false);
+    }
+    if (noforks) {
+        Log_debug(log, "Security_noforks()");
+        Dict* d = Dict_new(tempAlloc);
+        rpcCall(String_CONST("Security_noforks"), d, ctx, tempAlloc);
+    }
+    if (setuser) {
+        Log_debug(log, "Security_setUser(uid:%d, keepNetAdmin:%d)", uid, keepNetAdmin);
+        Dict* d = Dict_new(tempAlloc);
+        Dict_putInt(d, String_CONST("uid"), uid, tempAlloc);
+        Dict_putInt(d, String_CONST("keepNetAdmin"), keepNetAdmin, tempAlloc);
+        rpcCall0(String_CONST("Security_setUser"), d, ctx, tempAlloc, NULL, false);
+    }
+    if (nofiles) {
+        Log_debug(log, "Security_nofiles()");
+        Dict* d = Dict_new(tempAlloc);
+        rpcCall(String_CONST("Security_nofiles"), d, ctx, tempAlloc);
+    }
+    if (seccomp) {
+        Log_debug(log, "Security_seccomp()");
+        Dict* d = Dict_new(tempAlloc);
+        rpcCall(String_CONST("Security_seccomp"), d, ctx, tempAlloc);
+    }
+    if (setupComplete) {
+        Log_debug(log, "Security_setupComplete()");
+        Dict* d = Dict_new(tempAlloc);
+        rpcCall(String_CONST("Security_setupComplete"), d, ctx, tempAlloc);
+    }
 }
 
 static int tryPing(struct Allocator* tempAlloc, struct Context* ctx)
@@ -535,10 +595,10 @@ void Configurator_config(Dict* config,
                          struct Log* logger,
                          struct Allocator* alloc)
 {
-    struct Except* eh = NULL;
     struct Allocator* tempAlloc = Allocator_child(alloc);
+    struct UDPAddrIface* udp = UDPAddrIface_new(eventBase, NULL, alloc, NULL, logger);
     struct AdminClient* client =
-        AdminClient_new(sockAddr, adminPassword, eventBase, logger, tempAlloc);
+        AdminClient_new(&udp->generic, sockAddr, adminPassword, eventBase, logger, tempAlloc);
 
     struct Context ctx = {
         .logger = logger,
@@ -564,10 +624,10 @@ void Configurator_config(Dict* config,
     Dict* routerConf = Dict_getDict(config, String_CONST("router"));
     routerConfig(routerConf, tempAlloc, &ctx);
 
-    security(tempAlloc, &ctx);
+    List* secList = Dict_getList(config, String_CONST("security"));
+    security(tempAlloc, secList, logger, &ctx);
 
-    Dict* dnsConf = Dict_getDict(config, String_CONST("dns"));
-    dns(dnsConf, &ctx, eh);
+    Log_debug(logger, "Cjdns started in the background");
 
     Allocator_free(tempAlloc);
 }

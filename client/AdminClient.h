@@ -15,6 +15,7 @@
 #ifndef AdminClient_H
 #define AdminClient_H
 
+#include "interface/addressable/AddrIface.h"
 #include "benc/String.h"
 #include "benc/Dict.h"
 #include "memory/Allocator.h"
@@ -22,7 +23,7 @@
 #include "util/events/EventBase.h"
 #include "util/platform/Sockaddr.h"
 #include "util/Linker.h"
-Linker_require("admin/AdminClient.c")
+Linker_require("client/AdminClient.c")
 
 enum AdminClient_Error
 {
@@ -103,7 +104,8 @@ struct AdminClient_Promise* AdminClient_rpcCall(String* function,
                                                 struct Allocator* requestAlloc);
 
 
-struct AdminClient* AdminClient_new(struct Sockaddr* addr,
+struct AdminClient* AdminClient_new(struct AddrIface* ai,
+                                    struct Sockaddr* connectToAddress,
                                     String* adminPassword,
                                     struct EventBase* eventBase,
                                     struct Log* logger,
