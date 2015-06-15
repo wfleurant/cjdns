@@ -3,6 +3,12 @@
 cjdns  = require "cjdns/init"
 dkjson = require "dkjson"
 
+confpath = "../../cjdroute.conf"
+cjdns    = require "cjdns/init"
+conf     = cjdns.ConfigFile.new(confpath)
+admin    = conf:makeInterface()
+publictoip6 = "../../publictoip6 "
+
 --[[ function deprint, usage: visually debug string (f) and value (v) ]]--
 function deprint(f,v)
 	if not f then print(' -> ')
@@ -17,7 +23,7 @@ function deprint(f,v)
 end
 
 function publictoip6(publicKey)
-	local process = io.popen("/usr/bin/publictoip6 " .. publicKey, "r")
+	local process = io.popen("../../publictoip6 " .. publicKey, "r")
 	local ipv6    = process:read()
 	process:close()
 	return ipv6
@@ -41,8 +47,9 @@ function peer_stats()
 		user				Local Peers
 		duplicates			0
 	]]--
-	require("cjdns/uci")
-	admin = cjdns.uci.makeInterface()
+	-- require("cjdns/uci")
+	-- admin = cjdns.uci.makeInterface()
+	admin = conf:makeInterface()
 
 	local page = 0
 	local peers = {}
@@ -80,9 +87,9 @@ function dump_table()
 		path	0000.0003.a7b3.2ba7
 		ip		fc87:1a28:d22b:208a:fc5f:056f:6e93:fcc4
 	]]--
-	require("cjdns/uci")
-	admin = cjdns.uci.makeInterface()
-
+	--require("cjdns/uci")
+	-- admin = cjdns.uci.makeInterface()
+	admin = conf:makeInterface()
 	local page = 0
 	local peers = {}
 
@@ -115,7 +122,10 @@ function hype_add_form_submit(table)
 	local method = "POST"
 	local url = "http://api.hyperboria.net:8000/api/v1/node/update.json"
 	local lesock = httpsock(method, url, table)
-
+	deprint('treeStats', table.treeStats)
+	deprint('dumpTable', table.dumpTable)
+	deprint('sessStats', table.sessStats)
+	deprint('peerstats', table.peerstats)
 	return(lesock)
 
 end
@@ -180,9 +190,9 @@ function get_handles()
 		4	11918
 		5	11917
 	]]--
-	require("cjdns/uci")
-	admin = cjdns.uci.makeInterface()
-
+	-- require("cjdns/uci")
+	-- admin = cjdns.uci.makeInterface()
+	admn = conf:makeInterface()
 	local page = 0
 	local handles = {}
 
@@ -226,9 +236,9 @@ function sess_stats()
 		duplicates			0
 	]]--
 
-	require("cjdns/uci")
-	admin = cjdns.uci.makeInterface()
-
+	-- require("cjdns/uci")
+	-- admin = cjdns.uci.makeInterface()
+	admin = conf:makeInterface()
 	local handles = get_handles()
 	local ss = {}
 	for i,handle in pairs(handles) do
