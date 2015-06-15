@@ -35,7 +35,7 @@ scalability issues that plague existing networks.
 around the world.
 
 Cjdns has been tested on x86, amd64, ARMv5, ARMv7, MIPS, and PowerPC.
-It's [continually tested][buildbots] on Linux, FreeBSD, OS X, and Illumos
+It's [continually tested][buildbots] on Linux, FreeBSD, OS X, Windows and Illumos
 systems.
 
 The protocols and algorithms are experimental and subject to change.
@@ -47,7 +47,8 @@ To minimize the harm to the network, please update your cjdns nodes often.
 We are in need of some buildbots on more obscure systems and architectures.
 If you would like to donate one, you could mail it, or you could administer
 it and provide remote shell access. Please email `buildbot@seattlemesh.net`
-if you'd like to help out.
+if you'd like to run a buildbot. Note that it is not a general support inbox,
+other questions should be directed toward IRC.
 
 
 

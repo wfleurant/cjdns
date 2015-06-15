@@ -34,12 +34,7 @@ struct Node_Two
     uint32_t reach_pvt;
 
     /** This is used to mark/sweep nodes in getWorstNode(), it's meaningless otherwise. */
-    uint8_t marked;
-
-    /** Never remove this node from the table. */
-    uint8_t pinned;
-
-    uint16_t pad;
+    uint32_t marked;
 
     /** Time the node was last pinged, *not* reset on path changes. */
     uint64_t timeLastPinged;
@@ -147,6 +142,8 @@ static inline struct Node_Link* Node_getBestParent(struct Node_Two* node)
 {
     return node->bestParent_pvt;
 }
+
+bool Node_isAncestorOf(struct Node_Two* ancestor, struct Node_Two* child);
 
 void Node_setParentReachAndPath(struct Node_Two* node,
                                 struct Node_Link* bestParent,

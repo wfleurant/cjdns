@@ -113,6 +113,8 @@ struct Admin_pvt
     /** Length of addresses of clients which communicate with admin. */
     uint32_t addrLen;
 
+    struct Message* tempSendMsg;
+
     Identity
 };
 
@@ -129,9 +131,10 @@ static void sendBenc(Dict* message,
                      struct Allocator* alloc,
                      struct Admin_pvt* admin)
 {
-    #define sendBenc_PADDING 32
-    struct Message* msg = Message_new(0, Admin_MAX_RESPONSE_SIZE + sendBenc_PADDING, alloc);
-    BencMessageWriter_write(message, msg, NULL);
+    Message_reset(admin->tempSendMsg);
+    BencMessageWriter_write(message, admin->tempSendMsg, NULL);
+    struct Message* msg = Message_new(0, admin->tempSendMsg->length + 32, alloc);
+    Message_push(msg, admin->tempSendMsg->bytes, admin->tempSendMsg->length, NULL);
     sendMessage(msg, dest, admin);
 }
 
@@ -196,15 +199,15 @@ int Admin_sendMessage(Dict* message, String* txid, struct Admin* adminPub)
     struct Allocator* alloc = Allocator_child(admin->allocator);
 
     // Bounce back the user-supplied txid.
-    String userTxid = {
-        .bytes = txid->bytes + admin->addrLen,
-        .len = txid->len - admin->addrLen
-    };
+    String* userTxid =
+        String_newBinary(&txid->bytes[admin->addrLen], txid->len - admin->addrLen, alloc);
     if (txid->len > admin->addrLen) {
-        Dict_putString(message, TXID, &userTxid, alloc);
+        Dict_putString(message, TXID, userTxid, alloc);
     }
 
     sendBenc(message, &addr.addr, alloc, admin);
+
+    Dict_remove(message, TXID);
 
     Allocator_free(alloc);
 
@@ -524,6 +527,7 @@ struct Admin* Admin_new(struct AddrIface* ai,
     admin->map.allocator = alloc;
     admin->iface.send = receiveMessage;
     Iface_plumb(&admin->iface, &ai->iface);
+    admin->tempSendMsg = Message_new(0, Admin_MAX_RESPONSE_SIZE, alloc);
 
     admin->password = String_clone(password, alloc);
 

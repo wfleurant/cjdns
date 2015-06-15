@@ -268,7 +268,7 @@ static inline int sendNodes(struct NodeList* nodeList,
         struct Address addr;
         Bits_memcpyConst(&addr, &nodeList->nodes[i]->address, sizeof(struct Address));
 
-        addr.path = LabelSplicer_getLabelFor(addr.path, query->address->path);
+        addr.path = NumberCompress_getLabelFor(addr.path, query->address->path);
 
         Address_serialize(&nodes->bytes[i * Address_SERIALIZED_SIZE], &addr);
 
@@ -511,22 +511,11 @@ static void onResponseOrTimeout(String* data, uint32_t milliseconds, void* vping
     if (node && !Bits_memcmp(node->address.key, message->address->key, 32)) {
         NodeStore_pathResponse(module->nodeStore, message->address->path, milliseconds);
     } else {
-        struct Node_Link* link = NodeStore_discoverNode(module->nodeStore,
-                                                        message->address,
-                                                        message->encodingScheme,
-                                                        message->encIndex,
-                                                        milliseconds);
-        node = (link) ? link->child : NULL;
-    }
-
-    // EncodingSchemeModule should have added this node to the store, check it.
-    if (!node) {
-        #ifdef Log_DEBUG
-            uint8_t printedAddr[60];
-            Address_print(printedAddr, message->address);
-            Log_info(module->logger, "Got message from nonexistant node! [%s]\n", printedAddr);
-        #endif
-        return;
+        NodeStore_discoverNode(module->nodeStore,
+                               message->address,
+                               message->encodingScheme,
+                               message->encIndex,
+                               milliseconds);
     }
 
     #ifdef Log_DEBUG
@@ -552,10 +541,6 @@ struct RouterModule_Promise* RouterModule_newMessage(struct Address* addr,
                                                      struct RouterModule* module,
                                                      struct Allocator* alloc)
 {
-    // sending yourself a ping?
-//    Assert_true(Bits_memcmp(addr->key, module->address.key, 32));
-    Assert_true(addr->path != 1);
-
     Assert_ifParanoid(addr->path ==
         EncodingScheme_convertLabel(module->nodeStore->selfNode->encodingScheme,
                                     addr->path,
@@ -691,7 +676,8 @@ void RouterModule_peerIsReachable(uint64_t pathToPeer,
                                   uint64_t lagMilliseconds,
                                   struct RouterModule* module)
 {
-    Assert_ifParanoid(LabelSplicer_isOneHop(pathToPeer));
+    Assert_ifParanoid(EncodingScheme_isOneHop(module->nodeStore->selfNode->encodingScheme,
+                                              pathToPeer));
     struct Node_Two* nn = RouterModule_nodeForPath(pathToPeer, module);
     for (struct Node_Link* peerLink = nn->reversePeers; peerLink; peerLink = peerLink->nextPeer) {
         if (peerLink->parent != module->nodeStore->selfNode) { continue; }

@@ -14,6 +14,7 @@
  */
 #define ArrayList_NOCREATE
 #include "util/ArrayList.h"
+#include "util/Bits.h"
 
 #include <stddef.h>
 
@@ -46,13 +47,25 @@ void* ArrayList_get(void* vlist, int number)
     return list->elements[number];
 }
 
+void* ArrayList_shift(void* vlist)
+{
+    struct ArrayList_pvt* list = Identity_check((struct ArrayList_pvt*) vlist);
+    if (!list->length) { return NULL; }
+    void* out = list->elements[0];
+    list->length--;
+    if (list->length) {
+        Bits_memmove(list->elements, &list->elements[1], sizeof(char*) * list->length);
+    }
+    return out;
+}
+
 int ArrayList_put(void* vlist, int number, void* val)
 {
     struct ArrayList_pvt* list = Identity_check((struct ArrayList_pvt*) vlist);
     Assert_true(number >= 0 && number <= list->length);
     if (number >= list->capacity) {
         int capacity = list->capacity * 2;
-        list->elements = Allocator_realloc(list->alloc, list->elements, capacity);
+        list->elements = Allocator_realloc(list->alloc, list->elements, capacity * sizeof(char*));
         for (int i = list->capacity; i < capacity; i++) {
             list->elements[i] = NULL;
         }

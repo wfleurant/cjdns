@@ -102,11 +102,6 @@ void NodeStore_unlinkNodes(struct NodeStore* nodeStore, struct Node_Link* link);
  */
 struct Node_Link* NodeStore_nextLink(struct Node_Two* parent, struct Node_Link* startLink);
 
-
-void NodeStore_unpinNode(struct NodeStore* store, struct Node_Two* node);
-void NodeStore_pinNode(struct NodeStore* store, struct Node_Two* node);
-
-
 /**
  * Get the first peer along a path.
  *
@@ -142,6 +137,11 @@ uint64_t NodeStore_optimizePath(struct NodeStore* nodeStore, uint64_t path);
  */
 #define NodeStore_getRouteLabel_PARENT_NOT_FOUND           ((~((uint64_t)0))-1)
 #define NodeStore_getRouteLabel_CHILD_NOT_FOUND            ((~((uint64_t)0))-2)
+#define NodeStore_getRouteLabel__ERR_MIN                   ((~((uint64_t)0))-3)
+static inline bool NodeStore_getRouteLabel_ERR(uint64_t x)
+{
+    return NodeStore_getRouteLabel__ERR_MIN <= x;
+}
 uint64_t NodeStore_getRouteLabel(struct NodeStore* nodeStore,
                                  uint64_t pathToParent,
                                  uint64_t pathParentToChild);
@@ -213,12 +213,13 @@ void NodeStore_brokenLink(struct NodeStore* nodeStore, uint64_t path, uint64_t p
 void NodeStore_disconnectedPeer(struct NodeStore* nodeStore, uint64_t path);
 
 struct Node_Two* NodeStore_getNextNode(struct NodeStore* nodeStore, struct Node_Two* lastNode);
+struct Node_Link* NodeStore_getNextLink(struct NodeStore* nodeStore, struct Node_Link* last);
 
 uint64_t NodeStore_timeSinceLastPing(struct NodeStore* nodeStore, struct Node_Two* node);
 
 // Used for DHT maintenance.
 #define NodeStore_bucketSize 4
-#define NodeStore_bucketNumber 512
+#define NodeStore_bucketNumber 128
 struct Address NodeStore_addrForBucket(struct Address* source, uint16_t bucket);
 uint16_t NodeStore_bucketForAddr(struct Address* source, struct Address* dest);
 struct NodeList* NodeStore_getNodesForBucket(struct NodeStore* nodeStore,

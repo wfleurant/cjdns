@@ -94,6 +94,26 @@ struct SessionManager_Session_pvt
 #define debugHandlesAndLabel0(logger, session, label, message) \
     debugHandlesAndLabel(logger, session, label, "%s", message)
 
+#define debugSession(logger, session, message, ...) \
+    do {                                                                               \
+        if (!Defined(Log_DEBUG)) { break; }                                            \
+        uint8_t sendPath[20];                                                          \
+        uint8_t recvPath[20];                                                          \
+        uint8_t ip[40];                                                                \
+        AddrTools_printPath(sendPath, (session)->pub.sendSwitchLabel);                 \
+        AddrTools_printPath(recvPath, (session)->pub.recvSwitchLabel);                 \
+        AddrTools_printIp(ip, (session)->pub.caSession->herIp6);                       \
+        Log_debug((logger), "Session sendPath[%s] recvPath[%s] ip[%s] " message,       \
+                  sendPath,                                                            \
+                  recvPath,                                                            \
+                  ip,                                                                  \
+                  __VA_ARGS__);                                                        \
+    } while (0)
+//CHECKFILES_IGNORE ;
+
+#define debugSession0(logger, session, message) \
+    debugSession(logger, session, "%s", message)
+
 static void sendSession(struct SessionManager_Session_pvt* sess,
                         uint64_t path,
                         uint32_t destPf,
@@ -173,7 +193,6 @@ struct SessionManager_HandleList* SessionManager_getHandleList(struct SessionMan
     }
     return out;
 }
-
 
 static struct SessionManager_Session_pvt* getSession(struct SessionManager_pvt* sm,
                                                      uint8_t ip6[16],
@@ -323,16 +342,45 @@ static void checkTimedOutBuffers(struct SessionManager_pvt* sm)
     }
 }
 
+static void triggerSearch(struct SessionManager_pvt* sm, uint8_t target[16])
+{
+    struct Allocator* eventAlloc = Allocator_child(sm->alloc);
+    struct Message* eventMsg = Message_new(0, 512, eventAlloc);
+    Message_push(eventMsg, target, 16, NULL);
+    Message_push32(eventMsg, 0xffffffff, NULL);
+    Message_push32(eventMsg, PFChan_Core_SEARCH_REQ, NULL);
+    Iface_send(&sm->eventIf, eventMsg);
+    Allocator_free(eventAlloc);
+}
+
 static void checkTimedOutSessions(struct SessionManager_pvt* sm)
 {
+    bool searchTriggered = false;
     for (int i = 0; i < (int)sm->ifaceMap.count; i++) {
         struct SessionManager_Session_pvt* sess = sm->ifaceMap.values[i];
         int64_t now = Time_currentTimeMilliseconds(sm->eventBase);
-        if (now - sess->pub.timeOfLastIn < sm->pub.sessionTimeoutMilliseconds) { continue; }
-        sendSession(sess, sess->pub.sendSwitchLabel, 0xffffffff, PFChan_Core_SESSION_ENDED);
-        Map_OfSessionsByIp6_remove(i, &sm->ifaceMap);
-        Allocator_free(sess->alloc);
-        i--;
+        if (now - sess->pub.timeOfLastOut >= sm->pub.sessionIdleAfterMilliseconds &&
+            now - sess->pub.timeOfLastIn >= sm->pub.sessionIdleAfterMilliseconds)
+        {
+            // Session is in idle state
+        } else if (now - sess->pub.lastSearchTime >= sm->pub.sessionSearchAfterMilliseconds) {
+            // Session is not in idle state and requires a search
+            // But we're only going to trigger one search per cycle.
+            if (searchTriggered) { continue; }
+            debugSession0(sm->log, sess, "triggering search");
+            triggerSearch(sm, sess->pub.caSession->herIp6);
+            sess->pub.lastSearchTime = now;
+            searchTriggered = true;
+        }
+
+        // Session is in idle state or doesn't need a search right now, check if it's timed out.
+        if (now - sess->pub.timeOfLastIn < sm->pub.sessionTimeoutMilliseconds) {
+            debugSession0(sm->log, sess, "ended");
+            sendSession(sess, sess->pub.sendSwitchLabel, 0xffffffff, PFChan_Core_SESSION_ENDED);
+            Map_OfSessionsByIp6_remove(i, &sm->ifaceMap);
+            Allocator_free(sess->alloc);
+            i--;
+        }
     }
 }
 
@@ -375,13 +423,7 @@ static void needsLookup(struct SessionManager_pvt* sm, struct Message* msg)
     Allocator_adopt(lookupAlloc, msg->alloc);
     Assert_true(Map_BufferedMessages_put((struct Ip6*)header->ip6, &buffered, &sm->bufMap) > -1);
 
-    struct Allocator* eventAlloc = Allocator_child(lookupAlloc);
-    struct Message* eventMsg = Message_new(0, 512, eventAlloc);
-    Message_push(eventMsg, header->ip6, 16, NULL);
-    Message_push32(eventMsg, 0xffffffff, NULL);
-    Message_push32(eventMsg, PFChan_Core_SEARCH_REQ, NULL);
-    Iface_send(&sm->eventIf, eventMsg);
-    Allocator_free(eventAlloc);
+    triggerSearch(sm, header->ip6);
 }
 
 static Iface_DEFUN readyToSend(struct Message* msg,
@@ -509,6 +551,7 @@ static Iface_DEFUN incomingFromEventIf(struct Message* msg, struct Iface* iface)
         if (node.metric_be == 0xffffffff) {
             // this is a broken path
             if (sess->pub.sendSwitchLabel == Endian_bigEndianToHost64(node.path_be)) {
+                debugSession0(sm->log, sess, "broken path");
                 if (sess->pub.sendSwitchLabel == sess->pub.recvSwitchLabel) {
                     sess->pub.sendSwitchLabel = 0;
                 } else {
@@ -518,6 +561,7 @@ static Iface_DEFUN incomingFromEventIf(struct Message* msg, struct Iface* iface)
         } else {
             sess->pub.sendSwitchLabel = Endian_bigEndianToHost64(node.path_be);
             sess->pub.version = Endian_bigEndianToHost32(node.version_be);
+            debugSession0(sm->log, sess, "discovered path");
         }
     } else {
         sess = getSession(sm,
@@ -537,13 +581,14 @@ static Iface_DEFUN incomingFromEventIf(struct Message* msg, struct Iface* iface)
     return NULL;
 }
 
-struct SessionManager* SessionManager_new(struct Allocator* alloc,
+struct SessionManager* SessionManager_new(struct Allocator* allocator,
                                           struct EventBase* eventBase,
                                           struct CryptoAuth* cryptoAuth,
                                           struct Random* rand,
                                           struct Log* log,
                                           struct EventEmitter* ee)
 {
+    struct Allocator* alloc = Allocator_child(allocator);
     struct SessionManager_pvt* sm = Allocator_calloc(alloc, sizeof(struct SessionManager_pvt), 1);
     sm->alloc = alloc;
     sm->pub.switchIf.send = incomingFromSwitchIf;
@@ -555,6 +600,9 @@ struct SessionManager* SessionManager_new(struct Allocator* alloc,
     sm->eventBase = eventBase;
     sm->pub.sessionTimeoutMilliseconds = SessionManager_SESSION_TIMEOUT_MILLISECONDS_DEFAULT;
     sm->pub.maxBufferedMessages = SessionManager_MAX_BUFFERED_MESSAGES_DEFAULT;
+    sm->pub.sessionIdleAfterMilliseconds = SessionManager_SESSION_IDLE_AFTER_MILLISECONDS_DEFAULT;
+    sm->pub.sessionSearchAfterMilliseconds =
+        SessionManager_SESSION_SEARCH_AFTER_MILLISECONDS_DEFAULT;
 
     sm->eventIf.send = incomingFromEventIf;
     EventEmitter_regCore(ee, &sm->eventIf, PFChan_Pathfinder_NODE);

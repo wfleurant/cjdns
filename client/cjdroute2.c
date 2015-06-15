@@ -361,7 +361,6 @@ static int genconf(struct Random* rand, bool eth)
 
 static int usage(struct Allocator* alloc, char* appName)
 {
-    char* archInfo = ArchInfo_describe(ArchInfo_detect(), alloc);
     char* sysInfo = SysInfo_describe(SysInfo_detect(), alloc);
     printf("Cjdns %s %s\n"
            "Usage: %s [--help] [--genconf] [--bench] [--version] [--cleanconf] [--nobg]\n"
@@ -375,13 +374,18 @@ static int usage(struct Allocator* alloc, char* appName)
            "  Find somebody to connect to.\n"
            "  Check out the IRC channel or http://hyperboria.net/\n"
            "  for information about how to meet new people and make connect to them.\n"
+           "  Read more here: https://github.com/cjdelisle/cjdns/#2-find-a-friend\n"
            "\n"
            "Step 3:\n"
+           "  Add that somebody's node to your cjdroute.conf file.\n"
+           "  https://github.com/cjdelisle/cjdns/#3-connect-your-node-to-your-friends-node\n"
+           "\n"
+           "Step 4:\n"
            "  Fire it up!\n"
            "    sudo %s < cjdroute.conf\n"
            "\n"
            "For more information about other functions and non-standard setups, see README.md\n",
-           archInfo, sysInfo, appName, appName, appName);
+           ArchInfo_getArchStr(), sysInfo, appName, appName, appName);
 
     return 0;
 }
@@ -446,6 +450,11 @@ static void checkRunningInstance(struct Allocator* allocator,
     }
 
     Allocator_free(alloc);
+}
+
+static void onCoreExit(int64_t exit_status, int term_signal)
+{
+    Assert_failure("Core exited with status [%d], signal [%d]\n", (int)exit_status, term_signal);
 }
 
 int main(int argc, char** argv)
@@ -558,9 +567,8 @@ int main(int argc, char** argv)
     }
 
     // --------------------- Welcome to cjdns ---------------------- //
-    char* archInfo = ArchInfo_describe(ArchInfo_detect(), allocator);
     char* sysInfo = SysInfo_describe(SysInfo_detect(), allocator);
-    Log_info(logger, "Cjdns %s %s", archInfo, sysInfo);
+    Log_info(logger, "Cjdns %s %s", ArchInfo_getArchStr(), sysInfo);
 
     // --------------------- Check for running instance  --------------------- //
 
@@ -591,7 +599,7 @@ int main(int argc, char** argv)
     if (!privateKey) {
         Except_throw(eh, "Need to specify privateKey.");
     }
-    Process_spawn(corePath, args, eventBase, allocator);
+    Process_spawn(corePath, args, eventBase, allocator, onCoreExit);
 
     // --------------------- Pre-Configure Core ------------------------- //
     Dict* preConf = Dict_new(allocator);

@@ -15,7 +15,6 @@
 #ifndef LabelSplicer_H
 #define LabelSplicer_H
 
-#include "switch/NumberCompress.h"
 #include "util/Bits.h"
 
 #include <stdint.h>
@@ -48,42 +47,6 @@ static inline uint64_t LabelSplicer_splice(uint64_t goHere, uint64_t viaHere)
     }
 
     return ((goHere ^ 1) << log2ViaHere) ^ viaHere;
-}
-
-/**
- * Get the label for a particular destination from a given source.
- * This needs to be called before handing out a label because if a source interface is
- * represented using more bits than the destination interface, the destination interface
- * must be padded out so that the switch will find the source and destination labels compatable.
- *
- * @param target the label for the location to send to in host byte order.
- * @param whoIsAsking the label for the node which we are sending the target to in host byte order.
- * @return the modified target for that node in host byte order.
- */
-static inline uint64_t LabelSplicer_getLabelFor(uint64_t target, uint64_t whoIsAsking)
-{
-    uint32_t targetBits = NumberCompress_bitsUsedForLabel(target);
-    uint32_t whoIsAskingBits = NumberCompress_bitsUsedForLabel(whoIsAsking);
-
-    if (targetBits >= whoIsAskingBits) {
-        return target;
-    }
-
-    uint32_t targetIfaceNum = NumberCompress_getDecompressed(target, targetBits);
-
-    return ((target & (UINT64_MAX << targetBits)) << (whoIsAskingBits - targetBits))
-        | NumberCompress_getCompressed(targetIfaceNum, whoIsAskingBits);
-}
-
-/**
- * Determine if the node at the end of the given label is one hop away.
- *
- * @param label the label to test in host byte order.
- * @return true if the node is 1 hop away, false otherwise.
- */
-static inline bool LabelSplicer_isOneHop(uint64_t label)
-{
-    return (int)NumberCompress_bitsUsedForLabel(label) == Bits_log2x64(label);
 }
 
 /**

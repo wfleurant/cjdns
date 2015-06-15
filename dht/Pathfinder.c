@@ -26,36 +26,28 @@
 #include "dht/dhtcore/SearchRunner.h"
 #include "dht/dhtcore/SearchRunner_admin.h"
 #include "dht/dhtcore/NodeStore_admin.h"
+#include "dht/dhtcore/Janitor_admin.h"
 #include "dht/dhtcore/Janitor.h"
 #include "dht/dhtcore/Router_new.h"
 #include "util/AddrTools.h"
+#include "util/events/Timeout.h"
 #include "wire/Error.h"
+#include "wire/PFChan.h"
 #include "util/CString.h"
 
 ///////////////////// [ Address ][ content... ]
-
-/** The number of milliseconds between attempting local maintenance searches. */
-#define LOCAL_MAINTENANCE_SEARCH_MILLISECONDS 1000
-
-/**
- * The number of milliseconds to pass between global maintainence searches.
- * These are searches for random targets which are used to discover new nodes.
- */
-#define GLOBAL_MAINTENANCE_SEARCH_MILLISECONDS 30000
 
 #define RUMORMILL_CAPACITY 64
 
 struct Pathfinder_pvt
 {
     struct Pathfinder pub;
-    struct Iface eventIf;
     struct DHTModule dhtModule;
     struct Allocator* alloc;
     struct Log* log;
     struct EventBase* base;
     struct Random* rand;
     struct Admin* admin;
-    struct EventEmitter* ee;
 
     #define Pathfinder_pvt_state_INITIALIZING 0
     #define Pathfinder_pvt_state_RUNNING 1
@@ -68,6 +60,7 @@ struct Pathfinder_pvt
     struct Router* router;
     struct SearchRunner* searchRunner;
     struct RumorMill* rumorMill;
+    struct Janitor* janitor;
 
     Identity
 };
@@ -109,7 +102,7 @@ static int incomingFromDHT(struct DHTMessage* dmessage, void* vpf)
     }
     //Log_debug(pf->log, "send DHT request");
 
-    Iface_send(&pf->eventIf, msg);
+    Iface_send(&pf->pub.eventIf, msg);
     return 0;
 }
 
@@ -135,7 +128,7 @@ static Iface_DEFUN sendNode(struct Message* msg,
         ((struct PFChan_Node*) msg->bytes)->path_be = 0;
     }
     Message_push32(msg, PFChan_Pathfinder_NODE, NULL);
-    return Iface_next(&pf->eventIf, msg);
+    return Iface_next(&pf->pub.eventIf, msg);
 }
 
 static void onBestPathChange(void* vPathfinder, struct Node_Two* node)
@@ -187,16 +180,14 @@ static Iface_DEFUN connected(struct Pathfinder_pvt* pf, struct Message* msg)
                                         pf->rumorMill,
                                         pf->alloc);
 
-    Janitor_new(LOCAL_MAINTENANCE_SEARCH_MILLISECONDS,
-                GLOBAL_MAINTENANCE_SEARCH_MILLISECONDS,
-                routerModule,
-                pf->nodeStore,
-                pf->searchRunner,
-                pf->rumorMill,
-                pf->log,
-                pf->alloc,
-                pf->base,
-                pf->rand);
+    pf->janitor = Janitor_new(routerModule,
+                              pf->nodeStore,
+                              pf->searchRunner,
+                              pf->rumorMill,
+                              pf->log,
+                              pf->alloc,
+                              pf->base,
+                              pf->rand);
 
     EncodingSchemeModule_register(pf->registry, pf->log, pf->alloc);
 
@@ -211,6 +202,7 @@ static Iface_DEFUN connected(struct Pathfinder_pvt* pf, struct Message* msg)
         NodeStore_admin_register(pf->nodeStore, pf->admin, pf->alloc);
         RouterModule_admin_register(routerModule, pf->router, pf->admin, pf->alloc);
         SearchRunner_admin_register(pf->searchRunner, pf->admin, pf->alloc);
+        Janitor_admin_register(pf->janitor, pf->admin, pf->alloc);
     }
 
     pf->state = Pathfinder_pvt_state_RUNNING;
@@ -267,7 +259,12 @@ static Iface_DEFUN searchReq(struct Message* msg, struct Pathfinder_pvt* pf)
     AddrTools_printIp(printedAddr, addr);
     Log_debug(pf->log, "Search req [%s]", printedAddr);
 
-    SearchRunner_search(addr, 20, 3, pf->searchRunner, pf->alloc);
+    struct Node_Two* node = NodeStore_nodeForAddr(pf->nodeStore, addr);
+    if (node) {
+        onBestPathChange(pf, node);
+    } else {
+        SearchRunner_search(addr, 20, 3, pf->searchRunner, pf->alloc);
+    }
     return NULL;
 }
 
@@ -312,12 +309,12 @@ static Iface_DEFUN session(struct Message* msg, struct Pathfinder_pvt* pf)
     String* str = Address_toString(&addr, msg->alloc);
     Log_debug(pf->log, "Session [%s]", str->bytes);
 
+    /* This triggers for every little ping we send to some random node out there which
+     * sucks too much to ever get into the nodeStore.
     struct Node_Two* node = NodeStore_nodeForAddr(pf->nodeStore, addr.ip6.bytes);
-    if (node) {
-        NodeStore_pinNode(pf->nodeStore, node);
-    } else {
+    if (!node) {
         SearchRunner_search(addr.ip6.bytes, 20, 3, pf->searchRunner, pf->alloc);
-    }
+    }*/
 
     return NULL;
 }
@@ -328,12 +325,6 @@ static Iface_DEFUN sessionEnded(struct Message* msg, struct Pathfinder_pvt* pf)
     addressForNode(&addr, msg);
     String* str = Address_toString(&addr, msg->alloc);
     Log_debug(pf->log, "Session ended [%s]", str->bytes);
-
-    struct Node_Two* node = NodeStore_nodeForAddr(pf->nodeStore, addr.ip6.bytes);
-    if (node) {
-        NodeStore_unpinNode(pf->nodeStore, node);
-    }
-
     return NULL;
 }
 
@@ -341,8 +332,20 @@ static Iface_DEFUN discoveredPath(struct Message* msg, struct Pathfinder_pvt* pf
 {
     struct Address addr;
     addressForNode(&addr, msg);
-    String* str = Address_toString(&addr, msg->alloc);
-    Log_debug(pf->log, "Discovered path [%s]", str->bytes);
+
+    // We're somehow aware of this path (even if it's unused)
+    if (NodeStore_linkForPath(pf->nodeStore, addr.path)) { return NULL; }
+
+    // If we don't already care about the destination, then don't do anything.
+    struct Node_Two* nn = NodeStore_nodeForAddr(pf->nodeStore, addr.ip6.bytes);
+    if (!nn) { return NULL; }
+
+    // Our best path is "shorter" (label bits which is somewhat representitive of hop count)
+    // basically this is just to dampen the flood to the RM because otherwise it prevents Janitor
+    // from getting any actual work done.
+    if (nn->address.path < addr.path) { return NULL; }
+
+    Log_debug(pf->log, "Discovered path [%s]", Address_toString(&addr, msg->alloc)->bytes);
     RumorMill_addNode(pf->rumorMill, &addr);
     return NULL;
 }
@@ -351,7 +354,7 @@ static Iface_DEFUN handlePing(struct Message* msg, struct Pathfinder_pvt* pf)
 {
     Log_debug(pf->log, "Received ping");
     Message_push32(msg, PFChan_Pathfinder_PONG, NULL);
-    return Iface_next(&pf->eventIf, msg);
+    return Iface_next(&pf->pub.eventIf, msg);
 }
 
 static Iface_DEFUN handlePong(struct Message* msg, struct Pathfinder_pvt* pf)
@@ -381,11 +384,13 @@ static Iface_DEFUN incomingMsg(struct Message* msg, struct Pathfinder_pvt* pf)
 
     DHTModuleRegistry_handleIncoming(&dht, pf->registry);
 
+    if (!version && addr.protocolVersion) {
+        struct Message* nodeMsg = Message_new(0, 256, msg->alloc);
+        Iface_CALL(sendNode, nodeMsg, &addr, 0xfffffff0u, pf);
+    }
     if (dht.pleaseRespond) {
         // what a beautiful hack, see incomingFromDHT
-        return Iface_next(&pf->eventIf, msg);
-    } else if (!version && addr.protocolVersion) {
-        return sendNode(msg, &addr, 0xfffffff0, pf);
+        return Iface_next(&pf->pub.eventIf, msg);
     }
 
     return NULL;
@@ -393,7 +398,7 @@ static Iface_DEFUN incomingMsg(struct Message* msg, struct Pathfinder_pvt* pf)
 
 static Iface_DEFUN incomingFromEventIf(struct Message* msg, struct Iface* eventIf)
 {
-    struct Pathfinder_pvt* pf = Identity_containerOf(eventIf, struct Pathfinder_pvt, eventIf);
+    struct Pathfinder_pvt* pf = Identity_containerOf(eventIf, struct Pathfinder_pvt, pub.eventIf);
     enum PFChan_Core ev = Message_pop32(msg, NULL);
     if (Pathfinder_pvt_state_INITIALIZING == pf->state) {
         Assert_true(ev == PFChan_Core_CONNECT);
@@ -421,38 +426,43 @@ static void sendEvent(struct Pathfinder_pvt* pf, enum PFChan_Pathfinder ev, void
     struct Message* msg = Message_new(0, 512+size, alloc);
     Message_push(msg, data, size, NULL);
     Message_push32(msg, ev, NULL);
-    Iface_send(&pf->eventIf, msg);
+    Iface_send(&pf->pub.eventIf, msg);
     Allocator_free(alloc);
 }
 
-struct Pathfinder* Pathfinder_register(struct Allocator* alloc,
-                                       struct Log* log,
-                                       struct EventBase* base,
-                                       struct Random* rand,
-                                       struct Admin* admin,
-                                       struct EventEmitter* ee)
+static void init(void* vpf)
 {
-    struct Pathfinder_pvt* pf = Allocator_calloc(alloc, sizeof(struct Pathfinder_pvt), 1);
-    pf->alloc = alloc;
-    pf->log = log;
-    pf->base = base;
-    pf->rand = rand;
-    pf->admin = admin;
-    pf->ee = ee;
-    Identity_set(pf);
-
-    pf->eventIf.send = incomingFromEventIf;
-    EventEmitter_regPathfinderIface(ee, &pf->eventIf);
-
-    pf->dhtModule.context = pf;
-    pf->dhtModule.handleOutgoing = incomingFromDHT;
-
+    struct Pathfinder_pvt* pf = Identity_check((struct Pathfinder_pvt*) vpf);
     struct PFChan_Pathfinder_Connect conn = {
         .superiority_be = Endian_hostToBigEndian32(1),
         .version_be = Endian_hostToBigEndian32(Version_CURRENT_PROTOCOL)
     };
     CString_strncpy(conn.userAgent, "Cjdns internal pathfinder", 64);
     sendEvent(pf, PFChan_Pathfinder_CONNECT, &conn, PFChan_Pathfinder_Connect_SIZE);
+}
+
+struct Pathfinder* Pathfinder_register(struct Allocator* allocator,
+                                       struct Log* log,
+                                       struct EventBase* base,
+                                       struct Random* rand,
+                                       struct Admin* admin)
+{
+    struct Allocator* alloc = Allocator_child(allocator);
+    struct Pathfinder_pvt* pf = Allocator_calloc(alloc, sizeof(struct Pathfinder_pvt), 1);
+    Identity_set(pf);
+    pf->alloc = alloc;
+    pf->log = log;
+    pf->base = base;
+    pf->rand = rand;
+    pf->admin = admin;
+
+    pf->pub.eventIf.send = incomingFromEventIf;
+
+    pf->dhtModule.context = pf;
+    pf->dhtModule.handleOutgoing = incomingFromDHT;
+
+    // This needs to be done asynchronously so the pf can be plumbed to the core
+    Timeout_setTimeout(init, pf, 0, base, alloc);
 
     return &pf->pub;
 }
