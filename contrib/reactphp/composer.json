@@ -1,0 +1,7 @@
+{
+    "require": {
+        "react/react": "^0.4.2",
+        "react/socket-client": "^0.4.3",
+        "react/datagram": "^1.0"
+    }
+}
