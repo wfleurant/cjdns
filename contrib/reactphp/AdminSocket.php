@@ -1,8 +1,12 @@
 <?php
 
 include('Bencode.php');
+include('Admin.php');
 include('vendor/autoload.php');
 
+$cjdfile="./.cjdnsadmin";
+$admindata = new cjdnsadmin($cjdfile);
+$cjdnsadmin = $admindata;
 
 // $loop = React\EventLoop\Factory::create();
 // $socket = new React\Socket\Server($loop);
@@ -15,7 +19,7 @@ $connector = new React\SocketClient\Connector($loop, $dns);
 
 $loop = React\EventLoop\Factory::create();
 $factory = new React\Datagram\Factory($loop);
-$bencode = new Bencode;
+$Bencode = new Bencode;
 
 $api = (array) [
 
@@ -23,18 +27,23 @@ $api = (array) [
 		return strtoupper(bin2hex(openssl_random_pseudo_bytes($bytes=5, $cstrong)));
 	},
 
-    'qPing' => function($txid) use ($bencode) {
-    	$r = $bencode->encode([ 'q'=> 'ping', 'txid'=> $txid ]);
+    'qPing' => function($txid) use ($Bencode) {
+    	$r = $Bencode->encode([ 'q'=> 'ping', 'txid'=> $txid ]);
     	return($r);
     },
 
-    'qCookie' => function($txid) use ($bencode) {
-    	$r = $bencode->encode([ 'q'=> 'cookie', 'txid'=> $txid ]);
+    'qCookie' => function($txid) use ($Bencode) {
+    	$r = $Bencode->encode([ 'q'=> 'cookie', 'txid'=> $txid ]);
     	return($r);
     },
 
-    'qAdmin_availableFunctions' => function($txid) use ($bencode) {
-    	$r = $bencode->encode([ 'q'=> 'Admin_availableFunctions', 'txid'=> $txid ]);
+    'qAdmin_availableFunctions' => function($txid) use ($Bencode) {
+    	$r = $Bencode->encode([ 'q'=> 'Admin_availableFunctions', 'txid'=> $txid ]);
+    	return($r);
+    },
+
+    'qInterfaceController_peerStats' => function($txid) use ($Bencode) {
+    	$r = $Bencode->encode([ 'q'=> 'qInterfaceController_peerStats', 'txid'=> $txid ]);
     	return($r);
     },
 
@@ -42,28 +51,36 @@ $api = (array) [
 ];
 
 
-// Admin_availableFunctions
-
-$BCode = function($message=false) use ($bencode) {
-	$decoded = $bencode->decode($message, 'TYPE_ARRAY');
+$BCode = function($message=false) use ($Bencode) {
 
 	// echo 'RECV: "' . $message . PHP_EOL;
-	if ( (!$message) || (!is_array($message)) ) {
+	if ( (!$message) || (!is_array($message)) || (!isset($message[0]))) {
 		throw new Exception("Error Processing message: FALSE or not Array()", 1);
 	}
 
-	$cookie = (isset($decoded['cookie'])) ? $decoded['cookie'] : false;
-
+	/* variables */
+	$decoded = ($Bencode->decode($message[0], 'TYPE_ARRAY'));
 	$quotant = (isset($decoded['q'])) ? $decoded['q'] : false;
 
-	$pong = ($quotant == 'pong') ? true : false;
+	/* ordered list */
+	$cookie  = (isset($decoded['cookie'])) ? $decoded['cookie'] : false;
+	$pong 	 = ($quotant == 'pong') ? true : false;
 
-	return (object) [ $cookie, $quotant, $pong ];
+	return (object) [
+		/* variables */
+		'decoded'=> $decoded,
+		'quotant'=> $quotant,
+		/* ordered list */
+		'cookie'=> 	$cookie,
+		'pong'=> 	$pong,
+	];
+
+
 };
 
 
 $factory->createClient('localhost:11234')->then(
-  function (React\Datagram\Socket $client) use ($api, $bencode, $BCdee, $un='') {
+  function (React\Datagram\Socket $client) use ($api, $Bencode, $BCode, $cjdnsadmin) {
 
 	/* Generates Transaction Identifier */
 	$txid = $api['txid']();
@@ -71,7 +88,6 @@ $factory->createClient('localhost:11234')->then(
 	$client->send($qA_AF($txid));
 
 	/* Send qAdmin_availableFunctions */
-
 
 	/* Send ping request to cjdns API */
 	$txid = $api['txid']();
@@ -83,25 +99,21 @@ $factory->createClient('localhost:11234')->then(
 	$qCookie = $api['qCookie'];
 	$client->send($qCookie($txid));
 
-
-	/*
-	$request = [
-		'q'=> 		'auth',
-		'aq'=> 		$function,
-		'hash'=> 	hash('sha256', $this->password.$cookie),
-		'cookie'=> 	$cookie,
-		'args'=> 	$args,
-		'txid'=> 	$txid
-	];
-	*/
+	/* Perform cookie helo, call admin with password */
+	// $hash = hash('sha256', $cjdnsadmin->password.$qCookie);
+	$enable='adminCall';
+	/* Send cookie request to cjdns API */
+	$txid = $api['txid']();
+	$qCookie = $api['qInterfaceController_peerStats'];
+	$client->send($qCookie($txid));
 
 	// $request['hash'] = hash("sha256", $requestBencoded);
-    $client->on('message', function($message, $serverAddress, $client) use ($bencode, $BCdee)
+    $client->on('message', function($message, $serverAddress, $client, $enable='priv') use ($Bencode, $BCode)
     {
-
 		try {
-			// print_r($BCode['d0000006:cookie10:14023973204:txid10:C42129414Ae']));
-			$tried = $try_to_decode([$message]);
+			// print_r($BCode([$message]));
+			// return $BCode([$message]);
+			$tried = $BCode([$message]);
 			echo "\n I tried to decode and got: \n";
 			print_r($tried);
 
