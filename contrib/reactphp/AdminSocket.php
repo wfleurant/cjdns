@@ -4,22 +4,16 @@ include('Bencode.php');
 include('Admin.php');
 include('vendor/autoload.php');
 
+/*************************************************************/
 $cjdfile="./.cjdnsadmin";
 $admindata = new cjdnsadmin($cjdfile);
 $cjdnsadmin = $admindata;
-
-// $loop = React\EventLoop\Factory::create();
-// $socket = new React\Socket\Server($loop);
-/*
-$dnsResolverFactory = new React\Dns\Resolver\Factory();
-$dns = $dnsResolverFactory->createCached('8.8.8.8', $loop);
-$connector = new React\SocketClient\Connector($loop, $dns);
-
-*/
-
+/*************************************************************/
 $loop = React\EventLoop\Factory::create();
 $factory = new React\Datagram\Factory($loop);
 $Bencode = new Bencode;
+// $Bencode = new Rych\Bencode\Bencode; line 180 of Decoder.php
+/*************************************************************/
 
 $api = (array) [
 
@@ -53,7 +47,6 @@ $api = (array) [
 
 $BCode = function($message=false) use ($Bencode) {
 
-	// echo 'RECV: "' . $message . PHP_EOL;
 	if ( (!$message) || (!is_array($message)) || (!isset($message[0]))) {
 		throw new Exception("Error Processing message: FALSE or not Array()", 1);
 	}
@@ -111,10 +104,9 @@ $factory->createClient('localhost:11234')->then(
     $client->on('message', function($message, $serverAddress, $client, $enable='priv') use ($Bencode, $BCode)
     {
 		try {
-			// print_r($BCode([$message]));
-			// return $BCode([$message]);
+
 			$tried = $BCode([$message]);
-			echo "\n I tried to decode and got: \n";
+			echo "\nI tried to decode and got: \n";
 			print_r($tried);
 
 			/*********************/
@@ -123,9 +115,6 @@ $factory->createClient('localhost:11234')->then(
 			print($e->getMessage() . PHP_EOL);
 		}
     });
-
-
-
 
 });
 
