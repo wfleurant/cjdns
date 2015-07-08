@@ -1,6 +1,6 @@
 <?php
 
-Class cjdnsadmin {
+class cjdnsadmin {
 
 	public function __construct($file=false) {
 		// $c = [ 'password', 'config', 'addr', 'port' ];
