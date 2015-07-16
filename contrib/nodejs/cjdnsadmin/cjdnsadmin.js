@@ -25,7 +25,7 @@ var TIMEOUT_MILLISECONDS = 10000;
 var sendmsg = function (sock, addr, port, msg, txid, callback) {
     var to = setTimeout(function () {
         callback(new Error("timeout after " + TIMEOUT_MILLISECONDS + "ms"));
-        delete sock.handlers[json.txid];
+        delete sock.handlers[txid];
     }, TIMEOUT_MILLISECONDS);
     sock.handlers[txid] = {
         callback: callback,
@@ -206,11 +206,11 @@ var connect = module.exports.connect = function (addr, port, pass, callback) {
 };
 
 var connectWithAdminInfo = module.exports.connectWithAdminInfo = function (callback) {
-    var cjdnsAdmin;
+    var cjdnsAdmin = {'addr': '127.0.0.1', 'port': 11234, 'password': 'NONE'};
     nThen(function (waitFor) {
         Fs.readFile(process.env.HOME + '/.cjdnsadmin', waitFor(function (err, ret) {
-            if (err) { throw err; }
-            cjdnsAdmin = JSON.parse(String(ret));
+            if (err && err.code != 'ENOENT') { throw err; }
+            if (!err) { cjdnsAdmin = JSON.parse(String(ret)); }
         }));
     }).nThen(function (waitFor) {
         connect(cjdnsAdmin.addr, cjdnsAdmin.port, cjdnsAdmin.password, callback);

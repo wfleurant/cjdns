@@ -69,10 +69,7 @@ var getPlan = function(abiName, config) {
   var planPath = 'node_build/plans/' + abiName + '_plan.json';
   if (!Fs.existsSync(planPath)) {
     // TODO
-    throw new Error("build with no premade plan, TODO: generate plan for: "
-			+ "plan path: " + planPath + ", "  
-			+ process.platform + " " 
-			+ "(abi: " + abiName  + ")" );
+    throw new Error("build with no premade plan, TODO: generate one");
   }
   console.log('Using premade plan at [' + planPath + ']');
   var text = Fs.readFileSync(planPath);
