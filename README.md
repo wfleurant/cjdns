@@ -380,10 +380,11 @@ stay on [IRC](#community) so that people can reach you.
 
 ## Admin interface
 
-When cjdroute is up and running, the admin interface will be available at
-`localhost:11234` (this can be changed in the cjdroute.conf configuration file).
-See [admin/README.md](admin/README.md) for more information about the admin
-interface. There are several tools in `contrib/` that can interact with it.
+When cjdnroute is up and running, the admin interface will be available at
+`udp://localhost:11234` (this can be changed in the cjdroute.conf
+configuration file). See [admin/README.md](admin/README.md) for more
+information about the admin interface. There are several tools in `contrib/`
+that can interact with it.
 
 You can access the admin API with:
 
