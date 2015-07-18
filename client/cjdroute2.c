@@ -90,6 +90,9 @@ static int genconf(struct Random* rand, bool eth)
     Random_base32(rand, password3, 32);
     Random_base32(rand, password4, 32);
 
+    uint8_t adminPassword[32];
+    Random_base32(rand, adminPassword, 32);
+
     uint16_t port = 0;
     while (port <= 1024) {
         port = Random_uint16(rand);
@@ -140,11 +143,11 @@ static int genconf(struct Random* rand, bool eth)
            "    // Settings for administering and extracting information from your router.\n"
            "    // This interface provides functions which can be called through a UDP socket.\n"
            "    // See admin/Readme.md for more information about the API and try:\n"
-           "    // ./tools/cexec\n"
+           "    // ./contrib/python/cexec 'functions'\n"
            "    // For a list of functions which can be called.\n"
-           "    // For example: ./tools/cexec 'memory()'\n"
+           "    // For example:  ./contrib/python/cexec 'memory()'\n"
            "    // will call a function which gets the core's current memory consumption.\n"
-           "    // ./tools/cjdnslog\n"
+           "    // ./contrib/python/cjdnslog\n"
            "    // is a tool which uses this admin interface to get logs from cjdns.\n"
            "    \"admin\":\n"
            "    {\n"
@@ -152,11 +155,7 @@ static int genconf(struct Random* rand, bool eth)
            "        \"bind\": \"127.0.0.1:11234\",\n"
            "\n"
            "        // Password for admin RPC server.\n"
-           "        // This is a static password by default, so that tools like\n"
-           "        // ./tools/cexec can use the API without you creating a\n"
-           "        // config file at ~/.cjdnsadmin first. If you decide to\n"
-           "        // expose the admin API to the network, change the password!\n"
-           "        \"password\": \"NONE\"\n");
+           "        \"password\": \"%s\"\n", adminPassword);
     printf("    },\n"
            "\n"
            "    // Interfaces to connect to the switch core.\n"
