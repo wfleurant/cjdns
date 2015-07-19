@@ -1,5 +1,6 @@
 #!/usr/bin/env lua
 
+local rocks = require "luarocks.loader"
 cjdns  = require "cjdns/init"
 dkjson = require "dkjson"
 
