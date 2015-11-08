@@ -76,13 +76,17 @@ static Iface_DEFUN answerNeighborSolicitation(struct Message* msg, struct NDPSer
     Message_pop(msg, &ip6, Headers_IP6Header_SIZE, NULL);
     struct NDPHeader_NeighborSolicitation sol;
     Message_pop(msg, &sol, NDPHeader_NeighborSolicitation_SIZE, NULL);
-    Assert_true(!msg->length);
+    if (msg->length) {
+        /* Right now we ignore any ICMP options. Windows will send them. */
+        Log_debug(ns->log, "%d extra bytes (ICMP options?) in neighbor solicitation",
+            msg->length);
+    }
 
     struct NDPHeader_MacOpt macOpt = {
         .type = NDPHeader_MacOpt_type_TARGET,
         .one = 1
     };
-    Bits_memcpyConst(macOpt.mac, ns->localMac, Ethernet_ADDRLEN);
+    Bits_memcpy(macOpt.mac, ns->localMac, Ethernet_ADDRLEN);
     Message_push(msg, &macOpt, sizeof(struct NDPHeader_MacOpt), NULL);
 
     struct NDPHeader_NeighborAdvert na = {
@@ -93,11 +97,11 @@ static Iface_DEFUN answerNeighborSolicitation(struct Message* msg, struct NDPSer
             | NDPHeader_NeighborAdvert_bits_SOLICITED
             | NDPHeader_NeighborAdvert_bits_OVERRIDE
     };
-    Bits_memcpyConst(na.targetAddr, sol.targetAddr, 16);
+    Bits_memcpy(na.targetAddr, sol.targetAddr, 16);
     Message_push(msg, &na, sizeof(struct NDPHeader_NeighborAdvert), NULL);
 
-    Bits_memcpyConst(ip6.destinationAddr, ip6.sourceAddr, 16);
-    Bits_memcpyConst(ip6.sourceAddr, sol.targetAddr, 16);
+    Bits_memcpy(ip6.destinationAddr, ip6.sourceAddr, 16);
+    Bits_memcpy(ip6.sourceAddr, sol.targetAddr, 16);
     ip6.hopLimit = 255;
     ip6.payloadLength_be = Endian_hostToBigEndian16(msg->length);
 
@@ -121,6 +125,7 @@ static Iface_DEFUN receiveMessage(struct Message* msg, struct Iface* external)
         uint16_t ethertype = TUNMessageType_pop(msg, NULL);
         if (ethertype != Ethernet_TYPE_IP6) {
         } else if (isNeighborSolicitation(msg, ns)) {
+            //TODO(cjdns, Kubuxu): Filtering basing on cjdns network and tunnels.
             return answerNeighborSolicitation(msg, ns);
         }
         TUNMessageType_push(msg, ethertype, NULL);
@@ -145,6 +150,6 @@ struct NDPServer* NDPServer_new(struct Iface* external,
     Iface_plumb(&out->external, external);
     out->pub.internal.send = sendMessage;
     out->log = log;
-    Bits_memcpyConst(out->localMac, localMac, Ethernet_ADDRLEN);
+    Bits_memcpy(out->localMac, localMac, Ethernet_ADDRLEN);
     return &out->pub;
 }

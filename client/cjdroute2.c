@@ -38,11 +38,13 @@
 #include "util/Assert.h"
 #include "util/Base32.h"
 #include "util/CString.h"
+#include "util/Defined.h"
 #include "util/events/UDPAddrIface.h"
 #include "util/events/Time.h"
 #include "util/events/EventBase.h"
 #include "util/events/Pipe.h"
 #include "util/events/Process.h"
+#include "util/events/FakeNetwork.h"
 #include "util/Hex.h"
 #include "util/log/Log.h"
 #include "util/log/FileWriterLog.h"
@@ -90,9 +92,6 @@ static int genconf(struct Random* rand, bool eth)
     Random_base32(rand, password3, 32);
     Random_base32(rand, password4, 32);
 
-    uint8_t adminPassword[32];
-    Random_base32(rand, adminPassword, 32);
-
     uint16_t port = 0;
     while (port <= 1024) {
         port = Random_uint16(rand);
@@ -113,41 +112,48 @@ static int genconf(struct Random* rand, bool eth)
     printf("\n"
            "    // Anyone connecting and offering these passwords on connection will be allowed.\n"
            "    //\n"
-           "    // WARNING: Currently there is no key derivation done on the password field,\n"
-           "    //          DO NOT USE A PASSWORD HERE use something which is truly random and\n"
-           "    //          cannot be guessed.\n"
-           "    // Including a username in the beginning of the password string is encouraged\n"
-           "    // to aid in remembering which users are who.\n"
+           "    // WARNING: If a \"login\" parameter is passed, someone sniffing on the wire can\n"
+           "    //          sniff the packet and crack to find it. If the \"login\" is not passed\n"
+           "    //          then the hash of the 'password' is effectively the login, therefore\n"
+           "    //          that can be cracked.\n"
            "    //\n"
            "    \"authorizedPasswords\":\n"
            "    [\n"
            "        // A unique string which is known to the client and server.\n"
-           "        {\"password\": \"%s\"}\n", password);
+           "        // Specify an optional user to identify the peer locally.\n"
+           "        // It is not used for authentication.\n"
+           "        {\"password\": \"%s\", \"user\": \"default-login\"}\n", password);
     printf("\n"
            "        // More passwords should look like this.\n"
-           "        // {\"password\": \"%s\"},\n", password2);
-    printf("        // {\"password\": \"%s\"},\n", password3);
-    printf("        // {\"password\": \"%s\"},\n", password4);
+           "        // {\"password\": \"%s\", \"user\": \"my-second-peer\"},\n", password2);
+    printf("        // {\"password\": \"%s\", \"user\": \"my-third-peer\"},\n", password3);
+    printf("        // {\"password\": \"%s\", \"user\": \"my-fourth-peer\"},\n", password4);
     printf("\n"
            "        // Below is an example of your connection credentials\n"
            "        // that you can give to other people so they can connect\n"
-           "        // to you using your default password (from above)\n"
-           "        // Adding a unique password for each user is advisable\n"
+           "        // to you using your default password (from above).\n"
+           "        // The login field here yourself to your peer and the peerName field\n"
+           "        // is the name the peer which will be displayed in peerStats\n"
+           "        // Adding a unique password for each peer is advisable\n"
            "        // so that leaks can be isolated.\n"
-           "        //\n"
-           "        // \"your.external.ip.goes.here:%u\":{", port);
-    printf("\"password\":\"%s\",", password);
-    printf("\"publicKey\":\"%s.k\"}\n", publicKeyBase32);
+           "        /*\n"
+           "        \"your.external.ip.goes.here:%u\": {\n", port);
+    printf("            \"login\": \"default-login\",\n"
+           "            \"password\":\"%s\",\n", password);
+    printf("            \"publicKey\":\"%s.k\",\n", publicKeyBase32);
+    printf("            \"peerName\":\"your-name-goes-here\"\n"
+           "        },\n"
+           "        */\n");
     printf("    ],\n"
            "\n"
            "    // Settings for administering and extracting information from your router.\n"
            "    // This interface provides functions which can be called through a UDP socket.\n"
            "    // See admin/Readme.md for more information about the API and try:\n"
-           "    // ./contrib/python/cexec 'functions'\n"
+           "    // ./tools/cexec\n"
            "    // For a list of functions which can be called.\n"
-           "    // For example:  ./contrib/python/cexec 'memory()'\n"
+           "    // For example: ./tools/cexec 'memory()'\n"
            "    // will call a function which gets the core's current memory consumption.\n"
-           "    // ./contrib/python/cjdnslog\n"
+           "    // ./tools/cjdnslog\n"
            "    // is a tool which uses this admin interface to get logs from cjdns.\n"
            "    \"admin\":\n"
            "    {\n"
@@ -155,7 +161,11 @@ static int genconf(struct Random* rand, bool eth)
            "        \"bind\": \"127.0.0.1:11234\",\n"
            "\n"
            "        // Password for admin RPC server.\n"
-           "        \"password\": \"%s\"\n", adminPassword);
+           "        // This is a static password by default, so that tools like\n"
+           "        // ./tools/cexec can use the API without you creating a\n"
+           "        // config file at ~/.cjdnsadmin first. If you decide to\n"
+           "        // expose the admin API to the network, change the password!\n"
+           "        \"password\": \"NONE\"\n");
     printf("    },\n"
            "\n"
            "    // Interfaces to connect to the switch core.\n"
@@ -172,6 +182,14 @@ static int genconf(struct Random* rand, bool eth)
            "                \"connectTo\":\n"
            "                {\n"
            "                    // Add connection credentials here to join the network\n"
+           "                    // If you have several, don't forget the separating commas\n"
+           "                    // They should look like:\n"
+           "                    // \"ipv4 address:port\": {\n"
+           "                    //     \"login\": \"(optional) name your peer has for you\"\n"
+           "                    //     \"password\": \"password to connect with\",\n"
+           "                    //     \"publicKey\": \"remote node key.k\",\n"
+           "                    //     \"peerName\": \"(optional) human-readable name for peer\"\n"
+           "                    // },\n"
            "                    // Ask somebody who is already connected.\n"
            "                }\n"
            "            },\n"
@@ -310,10 +328,16 @@ static int genconf(struct Random* rand, bool eth)
            "        // Chroot changes the filesystem root directory which cjdns sees, blocking it\n"
            "        // from accessing files outside of the chroot sandbox, if the user does not\n"
            "        // have permission to use chroot(), this will fail quietly.\n"
-           "        // Use { \"chroot\": 0 } to disable.\n"
-           "        // Default: enabled (using \"/var/run\")\n"
-           "        { \"chroot\": \"/var/run/\" },\n"
-           "\n"
+           "        // Use { \"chroot\": 0 } to disable.\n");
+          if (Defined(android)) {
+    printf("        // Default: disabled\n"
+           "        { \"chroot\": 0 },\n");
+          }
+          else {
+    printf("        // Default: enabled (using \"/var/run\")\n"
+           "        { \"chroot\": \"/var/run/\" },\n");
+          }
+    printf("\n"
            "        // Nofiles is a deprecated security feature which prevents cjdns from opening\n"
            "        // any files at all, using this will block setting of IP addresses and\n"
            "        // hot-adding ETHInterface devices but for users who do not need this, it\n"
@@ -329,10 +353,16 @@ static int genconf(struct Random* rand, bool eth)
            "        // Seccomp is the most advanced sandboxing feature in cjdns, it uses\n"
            "        // SECCOMP_BPF to filter the system calls which cjdns is able to make on a\n"
            "        // linux system, strictly limiting it's access to the outside world\n"
-           "        // This will fail quietly on any non-linux system\n"
-           "        // Default: enabled\n"
-           "        { \"seccomp\": 1 },\n"
-           "\n"
+           "        // This will fail quietly on any non-linux system\n");
+          if (Defined(android)) {
+    printf("        // Default: disabled\n"
+           "        { \"seccomp\": 0 },\n");
+          }
+          else {
+    printf("        // Default: enabled\n"
+           "        { \"seccomp\": 1 },\n");
+          }
+    printf("\n"
            "        // The client sets up the core using a sequence of RPC calls, the responses\n"
            "        // to these calls are verified but in the event that the client crashes\n"
            "        // setup of the core completes, it could leave the core in an insecure state\n"
@@ -352,9 +382,14 @@ static int genconf(struct Random* rand, bool eth)
            "    },\n"
            "\n"
            "    // If set to non-zero, cjdns will not fork to the background.\n"
-           "    // Recommended for use in conjunction with \"logTo\":\"stdout\".\n"
-           "    \"noBackground\":0,\n"
-           "}\n");
+           "    // Recommended for use in conjunction with \"logTo\":\"stdout\".\n");
+          if (Defined(win32)) {
+    printf("    \"noBackground\":1,\n");
+          }
+          else {
+    printf("    \"noBackground\":0,\n");
+          }
+    printf("}\n");
 
     return 0;
 }
@@ -507,6 +542,7 @@ int main(int argc, char** argv)
         } else if ((CString_strcmp(argv[1], "--version") == 0)
             || (CString_strcmp(argv[1], "-v") == 0))
         {
+            printf("Cjdns version: %s\n", CJD_PACKAGE_VERSION);
             printf("Cjdns protocol version: %d\n", Version_CURRENT_PROTOCOL);
             return 0;
         } else if (CString_strcmp(argv[1], "--cleanconf") == 0) {

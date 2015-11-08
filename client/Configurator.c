@@ -149,17 +149,22 @@ static void authorizedPasswords(List* list, struct Context* ctx)
         Dict* d = List_getDict(list, i);
         String* passwd = Dict_getString(d, String_CONST("password"));
         String* user = Dict_getString(d, String_CONST("user"));
-        if (!user) {
-          user = String_printf(child, "password [%d]", i);
+        String* displayName = user;
+        if (!displayName) {
+            displayName = String_printf(child, "password [%d]", i);
         }
         //String* publicKey = Dict_getString(d, String_CONST("publicKey"));
         String* ipv6 = Dict_getString(d, String_CONST("ipv6"));
-        Log_info(ctx->logger, "Adding authorized password #[%d] for user [%s].", i, user->bytes);
+        Log_info(ctx->logger, "Adding authorized password #[%d] for user [%s].",
+            i, displayName->bytes);
         Dict *args = Dict_new(child);
         uint32_t i = 1;
         Dict_putInt(args, String_CONST("authType"), i, child);
         Dict_putString(args, String_CONST("password"), passwd, child);
-        Dict_putString(args, String_CONST("user"), user, child);
+        if (user) {
+            Dict_putString(args, String_CONST("user"), user, child);
+        }
+        Dict_putString(args, String_CONST("displayName"), displayName, child);
         if (ipv6) {
             Log_info(ctx->logger,
                 "  This connection password restricted to [%s] only.", ipv6->bytes);
@@ -450,16 +455,23 @@ static void security(struct Allocator* tempAlloc, List* conf, struct Log* log, s
     int chroot = 1;
     int setupComplete = 1;
     int setuser = 1;
+    if (Defined(win32)) {
+        setuser = 0;
+    }
 
     int uid = -1;
+    int64_t* group = NULL;
     int keepNetAdmin = 1;
 
     do {
         Dict* d = Dict_new(tempAlloc);
         Dict_putString(d, String_CONST("user"), String_CONST("nobody"), tempAlloc);
-        Dict* ret = NULL;
-        rpcCall0(String_CONST("Security_getUser"), d, ctx, tempAlloc, &ret, true);
-        uid = *Dict_getInt(ret, String_CONST("uid"));
+        if (!Defined(win32)) {
+            Dict* ret = NULL;
+            rpcCall0(String_CONST("Security_getUser"), d, ctx, tempAlloc, &ret, true);
+            uid = *Dict_getInt(ret, String_CONST("uid"));
+            group = Dict_getInt(ret, String_CONST("gid"));
+        }
     } while (0);
 
     for (int i = 0; conf && i < List_size(conf); i++) {
@@ -472,6 +484,7 @@ static void security(struct Allocator* tempAlloc, List* conf, struct Log* log, s
             Dict* ret = NULL;
             rpcCall0(String_CONST("Security_getUser"), d, ctx, tempAlloc, &ret, true);
             uid = *Dict_getInt(ret, String_CONST("uid"));
+            group = Dict_getInt(ret, String_CONST("gid"));
             int64_t* nka = Dict_getInt(elem, String_CONST("keepNetAdmin"));
             int64_t* exemptAngel = Dict_getInt(elem, String_CONST("exemptAngel"));
             keepNetAdmin = ((nka) ? *nka : ((exemptAngel) ? *exemptAngel : 0));
@@ -520,6 +533,8 @@ static void security(struct Allocator* tempAlloc, List* conf, struct Log* log, s
         Dict_putString(d, String_CONST("root"), String_CONST("/var/run/"), tempAlloc);
         rpcCall0(String_CONST("Security_chroot"), d, ctx, tempAlloc, NULL, false);
     }
+    /* FIXME(sdg): moving noforks after setuser might make nproc <- 0,0 work
+     on older kernels, where doing it before causes setuid to fail w EAGAIN. */
     if (noforks) {
         Log_debug(log, "Security_noforks()");
         Dict* d = Dict_new(tempAlloc);
@@ -529,6 +544,9 @@ static void security(struct Allocator* tempAlloc, List* conf, struct Log* log, s
         Log_debug(log, "Security_setUser(uid:%d, keepNetAdmin:%d)", uid, keepNetAdmin);
         Dict* d = Dict_new(tempAlloc);
         Dict_putInt(d, String_CONST("uid"), uid, tempAlloc);
+        if (group) {
+            Dict_putInt(d, String_CONST("gid"), (int)*group, tempAlloc);
+        }
         Dict_putInt(d, String_CONST("keepNetAdmin"), keepNetAdmin, tempAlloc);
         rpcCall0(String_CONST("Security_setUser"), d, ctx, tempAlloc, NULL, false);
     }
