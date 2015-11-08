@@ -27,13 +27,56 @@ scalability issues that plague existing networks.
     00:36 < tester> i value speed over anonymity any day
 
     <DuoNoxSol> it's notably more reliable than the normal internet
+    <DuoNoxSol> even though it really really shouldn't be
+    <DuoNoxSol> seeing as the connections are largely over the normal internet
 
     09:46 < Kubuxu> I so love cjdns code base
+
+## How close is it to complete?
+
+[Hyperboria][] is the largest cjdns network, with hundreds of active nodes
+around the world.
+
+Cjdns has been tested on x86, amd64, ARMv5, ARMv7, MIPS, and PowerPC.
+It's [continually tested][buildbots] on Linux, FreeBSD, OS X, Windows and Illumos
+systems.
+
+The protocols and algorithms are experimental and subject to change.
+To minimize the harm to the network, please update your cjdns nodes often.
+
+
+### You can help!
+
+We are in need of some buildbots on more obscure systems and architectures.
+If you would like to donate one, you could mail it, or you could administer
+it and provide remote shell access. Please email `buildbot@seattlemesh.net`
+if you'd like to run a buildbot. Note that it is not a general support inbox,
+other questions should be directed toward IRC.
+
+
+
+## How does routing work?
+
+In a cjdns network, a packet goes to a router and the router labels the packet
+with directions to the router best able to handle it. That is, a router which
+is physically nearby and has an address numerically close to the destination
+address of the packet. The directions are added to the packet to allow it to go
+through a number of routers with minimal handling, *a verifiable form of source
+routing*. They just read the label and bounce the packet wherever the next bits
+in the label tell them to. Routers have a responsibility to "keep in touch"
+with other routers that are physically close by and numerically near to their
+address.
+
+The router engine is a modified implementation of the [Kademlia][] distributed
+hash table.
+
 
 ## Community
 
 * [irc://irc.efnet.org/#cjdns][IRC Web]
 * [Hyperboria][] the largest cjdns network, as of October 2015 there are 2100 nodes.
+* irc://irc.efnet.org/#cjdns ([web client][IRC Web])
+* [Hyperboria][]
 * [Project Meshnet][]
 * [/r/darknetplan][]
 * [#cjdns on Twitter][]
@@ -49,6 +92,10 @@ Advanced configuration:
 
 * [Setup a cjdns NAT gateway for your LAN](doc/nat-gateway.md)
 * [Install cjdns on OpenIndiana](doc/open-indiana.md)
+
+### License
+
+[Available here](LICENSE)
 
 Thank you for your time and interest,
 
@@ -88,6 +135,33 @@ it will be downloaded and installed in the source tree.
 Install with homebrew:
 
     brew install cjdns
+
+On OS X, you must install the Command Line Developer Tools. If
+you already have a recent version of Xcode (>= OS X 10.9 and >= Xcode 5.0.1), run the
+following command:
+
+    xcode-select --install
+
+If Xcode is not installed, you can either install it through the App
+Store and run the command above, or make a free Apple Developer account here:
+[https://developer.apple.com/downloads/index.action](https://developer.apple.com/downloads/index.action).
+Then sign in, search for Command Line Tools, and install the latest package
+compatible with your version of OS X. If you encounter issues, there is a
+thorough [stackoverflow post](http://stackoverflow.com/a/9329325) on installing
+the Command Line Tools.
+
+You must also install git and Node.js. There are a few options. If you use [Homebrew](http://brew.sh/):
+
+    brew install git nodejs
+
+If you use [Macports](https://www.macports.org/):
+
+    sudo port install git-core nodejs
+
+Or if you use neither and would like to install the binaries from their websites:
+doc
+- Node.js: [http://nodejs.org/download/](http://nodejs.org/download/)
+- git: [http://git-scm.com/download](http://git-scm.com/download)
 
 #### OpenBSD:
 
@@ -353,6 +427,7 @@ You can access the admin API with:
 [Project Meshnet]: https://projectmeshnet.org
 [/r/darknetplan]: http://www.reddit.com/r/darknetplan
 [#cjdns on Twitter]: https://twitter.com/hashtag/cjdns
+[Project Meshnet Map]: http://map.projectmeshnet.org
 [Hyperboria Map]: http://www.fc00.org/
 [Buildbots]: https://buildbot.meshwith.me/cjdns/waterfall
 
