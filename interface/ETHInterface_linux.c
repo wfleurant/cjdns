@@ -70,7 +70,8 @@ struct ETHInterface_pvt
 
 static void sendMessageInternal(struct Message* message,
                                 struct sockaddr_ll* addr,
-                                struct ETHInterface_pvt* context)
+                                struct ETHInterface_pvt* context,
+                                struct Except* exHandler)
 {
     /* Cut down on the noise
     uint8_t buff[sizeof(*addr) * 2 + 1] = {0};
@@ -90,6 +91,8 @@ static void sendMessageInternal(struct Message* message,
                 Log_info(context->logger, "[%s] Got error sending to socket [%s]",
                          context->ifName->bytes, strerror(errno));
 
+                Except_throw(exHandler, "Interface %s removed: [%s]",
+                         context->ifName->bytes, strerror(errno));
             case EMSGSIZE:
             case ENOBUFS:
             case EAGAIN:;
@@ -127,7 +130,8 @@ static Iface_DEFUN sendMessage(struct Message* msg, struct Iface* iface)
         .fc00_be = Endian_hostToBigEndian16(0xfc00)
     };
     Message_push(msg, &hdr, ETHInterface_Header_SIZE, NULL);
-    sendMessageInternal(msg, &addr, ctx);
+    struct Except* eh = NULL;
+    sendMessageInternal(msg, &addr, ctx, eh);
     return NULL;
 }
 
