@@ -16,6 +16,7 @@
 #include "client/Configurator.h"
 #include "benc/String.h"
 #include "benc/Dict.h"
+#include "benc/serialization/standard/BencMessageWriter.h"
 #include "benc/Int.h"
 #include "benc/List.h"
 #include "memory/Allocator.h"
@@ -41,6 +42,8 @@ struct Context
 
     struct EventBase* base;
 };
+
+const int abort_if_invalid_ref = 1;
 
 static void rpcCallback(struct AdminClient_Promise* p, struct AdminClient_Result* res)
 {
@@ -211,7 +214,37 @@ static void udpInterface(Dict* config, struct Context* ctx)
                                                "is not a dictionary type.", key->bytes);
                     exit(-1);
                 }
-                Dict* value = entry->val->as.dictionary;
+                Dict* all =  entry->val->as.dictionary;
+                Dict* value = Dict_new(perCallAlloc);
+                String* pub_d = Dict_getString(all, String_CONST("publicKey"));
+                String* pss_d = Dict_getString(all, String_CONST("password"));
+                String* peerName_d = Dict_getString(all, String_CONST("peerName"));
+                String* login_d = Dict_getString(all, String_CONST("login"));
+
+                if ( !pub_d || !pss_d ) {
+                    const char * error_name = "(unknown)";
+                    if ( !pub_d ) {
+                        error_name = "publicKey";
+                    }
+                    if ( !pss_d ) {
+                        error_name = "password";
+                    }
+                    Log_warn(ctx->logger,
+                        "Skipping peer: missing %s for peer [%s]", error_name, key->bytes);
+                    if (abort_if_invalid_ref) {
+                        Assert_failure("Invalid peer reference");
+                    }
+                    else {
+                        entry = entry->next;
+                        continue;
+                    }
+                }
+
+                Dict_putString(value, String_CONST("publicKey"), pub_d, perCallAlloc);
+                Dict_putString(value, String_CONST("password"), pss_d, perCallAlloc);
+                Dict_putString(value, String_CONST("peerName"), peerName_d, perCallAlloc);
+                Dict_putString(value, String_CONST("login"), login_d, perCallAlloc);
+
                 Log_keys(ctx->logger, "Attempting to connect to node [%s].", key->bytes);
                 key = String_clone(key, perCallAlloc);
                 char* lastColon = CString_strrchr(key->bytes, ':');
@@ -232,6 +265,22 @@ static void udpInterface(Dict* config, struct Context* ctx)
                         key = String_new(Sockaddr_print(adr, perCallAlloc), perCallAlloc);
                     } else {
                         Log_warn(ctx->logger, "Failed to lookup hostname [%s]", key->bytes);
+                        entry = entry->next;
+                        continue;
+                    }
+                }
+                struct Allocator* child = Allocator_child(ctx->alloc);
+                struct Message* msg = Message_new(0, AdminClient_MAX_MESSAGE_SIZE + 256, child);
+                int r = BencMessageWriter_writeDictTry(value, msg, NULL);
+
+                const int max_reference_size = 298;
+                if (r != 0 || msg->length > max_reference_size) {
+                    Log_warn(ctx->logger, "Peer skipped:");
+                    Log_warn(ctx->logger, "Too long peer reference for [%s]", key->bytes);
+                    if (abort_if_invalid_ref) {
+                        Assert_failure("Invalid peer reference");
+                    }
+                    else {
                         entry = entry->next;
                         continue;
                     }
