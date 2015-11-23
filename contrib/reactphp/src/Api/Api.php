@@ -28,7 +28,7 @@ class Api {
 		return Bencode::encode([ 'q'=> 'ping', 'txid'=> $txid ]);
 	}
 
-	static function APing($txid=null) {
+	static function AuthPing($txid=null) {
 		$txid = ($txid) ? $txid : Api::txid();
 		$authreq = [ 'aq' => 'ping', 'q' => 'auth', 'txid' => $txid ];
 		return Bencode::encode($authreq);

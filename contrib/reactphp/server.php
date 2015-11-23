@@ -10,12 +10,9 @@ use Cjdns\Toolshed\Toolshed;
 /*use React\Promise\Deferred;*/
 use React\Espresso\Application as Espresso;
 
+$app  = new Espresso;
 $addr = '127.0.0.1';
 $port = 1337;
-
-$app = new Espresso;
-
-$hostport = '127.0.0.1:1337';
 
 /* Either set cjdns admin connection details in-file */
 $cfg = new Admin([
@@ -33,26 +30,7 @@ $app->get('/favicon.ico', function ($request, $response) {
     $response->writeHead(204); $response->end();
 });
 
-
-$app->get('/nodes', function ($request, $response) {
-
-    $response->writeHead(200, array('Content-Type' => 'text/plain'));
-    // echo $Socket->put(Api::InterfaceController_peerStats());
-    $data = '';
-    echo Toolshed::logo() . PHP_EOL;
-    return $response->end($data);
-
-});
-
-$app->get('/help', function ($request, $response) {
-    // echo $Socket->put(Api::Admin_availableFunctions());
-});
-
-/* Authenticated Ping */
-$app->get('/ping', function ($request, $response) use ($cfg) {
-
-    echo Toolshed::logger('Incoming: /ping');
-    $response->writeHead(200, array('Content-Type' => 'text/plain'));
+$Auth = function($method) use ($cfg) {
 
     $Socket = new Socket($cfg);
 
@@ -73,7 +51,6 @@ $app->get('/ping', function ($request, $response) use ($cfg) {
     /* Step 3: Calculate the SHA-256 of the entire request with
     the hash and cookie added, replace the hash in the request with this result. */
 
-    $method = Api::APing($txid);
     $hashcookie = [ 'hash' => $sha2auth, 'cookie' => $verona ];
 
     $prequest = array_merge($hashcookie, Api::decode($method));
@@ -81,6 +58,58 @@ $app->get('/ping', function ($request, $response) use ($cfg) {
     $prequest = Api::encode($prequest);
 
     $Socket->put($prequest);
+
+    return json_encode(Api::decode($Socket->message));
+};
+
+$app->get('/nodes', function ($request, $response) use ($Auth) {
+
+    echo Toolshed::logger('Incoming: /nodes');
+    $response->writeHead(200, array('Content-Type' => 'text/plain'));
+    $data = $Auth(Api::InterfaceController_peerStats());
+    echo PHP_EOL;
+    return $response->end($data);
+
+});
+
+/* Available Functions */
+$app->get('/help', function ($request, $response) use ($Auth, $cfg) {
+
+    echo Toolshed::logger('Incoming: /help');
+    $response->writeHead(200, array('Content-Type' => 'text/plain'));
+    $data = Api::Admin_availableFunctions();
+
+    $Socket = new Socket($cfg);
+    $Socket->put($data);
+
+    echo PHP_EOL;
+    return $response->end(json_encode(Api::decode($Socket->message)));
+
+});
+
+
+/* Authenticated Ping */
+$app->get('/authping', function ($request, $response) use ($Auth) {
+
+    echo Toolshed::logger('Incoming: /ping');
+    $response->writeHead(200, array('Content-Type' => 'text/plain'));
+    $data = $Auth(Api::AuthPing());
+    echo PHP_EOL;
+    return $response->end($data);
+
+});
+
+/* Un-Authenticated Ping */
+$app->get('/ping', function ($request, $response) use ($cfg) {
+
+    echo Toolshed::logger('Incoming: /ping');
+    $response->writeHead(200, array('Content-Type' => 'text/plain'));
+    $data = Api::Ping();
+
+    $Socket = new Socket($cfg);
+
+    $Socket->put($data);
+
     echo PHP_EOL;
     return $response->end(json_encode(Api::decode($Socket->message)));
 
