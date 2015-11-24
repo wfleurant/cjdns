@@ -7,7 +7,6 @@ use Cjdns\Api\Api;
 use Cjdns\Config\Admin;
 use Cjdns\Toolshed\Toolshed;
 
-/*use React\Promise\Deferred;*/
 use React\Espresso\Application as Espresso;
 
 $app  = new Espresso;
@@ -56,7 +55,6 @@ $Auth = function($method) use ($cfg) {
     $prequest = array_merge($hashcookie, Api::decode($method));
     $prequest['hash'] = hash('sha256', Api::encode($prequest));
     $prequest = Api::encode($prequest);
-
     $Socket->put($prequest);
 
     return json_encode(Api::decode($Socket->message));
@@ -77,13 +75,25 @@ $app->get('/help', function ($request, $response) use ($Auth, $cfg) {
 
     echo Toolshed::logger('Incoming: /help');
     $response->writeHead(200, array('Content-Type' => 'text/plain'));
-    $data = Api::Admin_availableFunctions();
+
+    $more = true; $page=0;
 
     $Socket = new Socket($cfg);
-    $Socket->put($data);
+    while ($more) {
+        $data = Api::Admin_availableFunctions(null, $page);
+        $Socket->put($data);
+
+        $result[$page] = Api::decode($Socket->message);
+
+        if (isset(Api::decode($Socket->message)['more'])) {
+            $page++;
+        } else {
+            $more = null;
+        }
+    }
 
     echo PHP_EOL;
-    return $response->end(json_encode(Api::decode($Socket->message)));
+    return $response->end(Toolshed::cleanresp($result, true));
 
 });
 

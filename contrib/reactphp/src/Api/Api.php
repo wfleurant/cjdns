@@ -6,9 +6,7 @@ use Cjdns\Toolshed\Toolshed;
 class Api {
 
 	static function txid() {
-		$txid = strtoupper(bin2hex(openssl_random_pseudo_bytes($bytes=10, $cstrong)));
-		echo Toolshed::logger('Generated TXID: ' . $txid);
-		return $txid;
+		return strtoupper(bin2hex(openssl_random_pseudo_bytes($bytes=10, $cstrong)));
 	}
 
 	static function hash() {
@@ -39,9 +37,12 @@ class Api {
 		return Bencode::encode([ 'q'=> 'cookie', 'txid' => $txid ]);
 	}
 
-	static function Admin_availableFunctions($txid=null) {
+	static function Admin_availableFunctions($txid=null, $page=0) {
 		$txid = ($txid) ? $txid : Api::txid();
-		return Bencode::encode([ 'q'=> 'Admin_availableFunctions', 'txid' => $txid ]);
+		return Bencode::encode([ 'q'=> 'Admin_availableFunctions',
+								 'txid' => $txid,
+								 'args' => [ 'page' => $page ]
+							   ]);
 	}
 
 	static function InterfaceController_peerStats($txid=null) {

@@ -21,7 +21,7 @@ If you need to use blocking calls, move them to a separate process and use inter
 
 
 
-## Cjdns 
+## Cjdns
 
 ### Server
 
@@ -44,5 +44,5 @@ $ php server.php
 
 ```
 $ curl localhost:1337/ping
-{"q":"pong","txid":"77CA034DD8E3DC037830"} 
+{"q":"pong","txid":"77CA034DD8E3DC037830"}
 ```
