@@ -5,6 +5,8 @@ use Cjdns\Toolshed\Toolshed;
 
 class Api {
 
+	/* cjdns api subcalls */
+
 	static function txid() {
 		return strtoupper(bin2hex(openssl_random_pseudo_bytes($bytes=10, $cstrong)));
 	}
@@ -20,6 +22,8 @@ class Api {
 	static function decode($message=[]) {
 		return Bencode::decode($message);
 	}
+
+	/* cjdns api */
 
 	static function Ping($txid=null) {
 		$txid = ($txid) ? $txid : Api::txid();
@@ -45,9 +49,12 @@ class Api {
 							   ]);
 	}
 
-	static function InterfaceController_peerStats($txid=null) {
+	static function InterfaceController_peerStats($txid=null, $page=0) {
 		$txid = ($txid) ? $txid : Api::txid();
-		return Bencode::encode([ 'q'=> 'InterfaceController_peerStats', 'txid' => $txid ]);
+		return Bencode::encode([ 'q'=> 'InterfaceController_peerStats',
+								 'txid' => $txid,
+								 'args' => [ 'page' => $page ]
+							   ]);
 	}
 
 

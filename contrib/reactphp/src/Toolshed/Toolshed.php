@@ -16,13 +16,21 @@ class Toolshed {
         return '[ᴄᴊᴅɴꜱ] ';
     }
 
-    static function cleanresp(Array $array, $flatten=true) {
+    static function cleanresp(Array $array, $flatten=true, $droptxrx=true) {
+
+        /* return a single array instead of many subarray / nested results  */
         if ($flatten) {
             $array = call_user_func_array('array_merge_recursive', $array);
         }
-        unset($array['txid']);
-        unset($array['more']);
+
+        /* drops multiple keys (txid, more) */
+        if ($droptxrx) {
+            unset($array['txid']);
+            unset($array['more']);
+        }
+
         return json_encode($array);
+
     }
 
     static function msgtrim($string) {
