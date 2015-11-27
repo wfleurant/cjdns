@@ -23,13 +23,17 @@ $cfg = new Admin([
 /* or use cjdns admin connection details in file as json object  */
 $cfg = new Admin(['cfgfile' => '/home/igel/.cjdnsadmin']);
 
-$app->get('/nodes', function ($request, $response) {
+$app->get('/nodes', function ($request, $response) use ($cfg) {
 
     echo Toolshed::logger('Incoming: /nodes');
     $response->writeHead(200, array('Content-Type' => 'text/plain'));
-    $data = $Auth(Api::InterfaceController_peerStats());
+
+    $data = Api::InterfaceController_peerStats();
+    $Socket = new Socket($cfg);
+    $Socket->authput($data);
+
     echo PHP_EOL;
-    return $response->end($data);
+    return $response->end(json_encode(Api::decode($Socket->message)));
 
 });
 
@@ -61,15 +65,15 @@ $app->get('/help', function ($request, $response) {
 
 });
 
-
 /* Authenticated Ping */
 $app->get('/authping', function ($request, $response) use ($cfg) {
 
     echo Toolshed::logger('Incoming: /ping');
-
     $response->writeHead(200, array('Content-Type' => 'text/plain'));
+
+    $data = Api::AuthPing();
     $Socket = new Socket($cfg);
-    $data = $Socket->authput(Api::AuthPing());
+    $Socket->authput($data);
 
     echo PHP_EOL;
     return $response->end($data);
@@ -80,10 +84,9 @@ $app->get('/ping', function ($request, $response) use ($cfg) {
 
     echo Toolshed::logger('Incoming: /ping');
     $response->writeHead(200, array('Content-Type' => 'text/plain'));
+
     $data = Api::Ping();
-
     $Socket = new Socket($cfg);
-
     $Socket->put($data);
 
     echo PHP_EOL;

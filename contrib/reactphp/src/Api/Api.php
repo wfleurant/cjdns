@@ -51,7 +51,8 @@ class Api {
 
 	static function InterfaceController_peerStats($txid=null, $page=0) {
 		$txid = ($txid) ? $txid : Api::txid();
-		return Bencode::encode([ 'q'=> 'InterfaceController_peerStats',
+		return Bencode::encode([ 'aq'=> 'InterfaceController_peerStats',
+								 'q' => 'auth',
 								 'txid' => $txid,
 								 'args' => [ 'page' => $page ]
 							   ]);
