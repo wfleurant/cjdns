@@ -21,6 +21,9 @@ class Toolshed {
         /* return a single array instead of many subarray / nested results  */
         if ($flatten) {
             $array = call_user_func_array('array_merge_recursive', $array);
+            $array['count'] = array_unique($array['count']);
+            $array['deprecation'] = array_unique($array['deprecation']);
+            $array['peers'] = array_unique($array['peers']);
         }
 
         /* drops multiple keys (txid, more) */
