@@ -21,9 +21,12 @@ class Toolshed {
         /* return a single array instead of many subarray / nested results  */
         if ($flatten) {
             $array = call_user_func_array('array_merge_recursive', $array);
-            $array['count'] = array_unique($array['count']);
-            $array['deprecation'] = array_unique($array['deprecation']);
-            $array['peers'] = array_unique($array['peers']);
+
+            foreach ([ 'count', 'deprecation', 'peers' ] as $u) {
+                if (isset($array[$u])) {
+                    $array[$u] = array_unique($array[$u]);
+                }
+            }
         }
 
         /* drops multiple keys (txid, more) */
@@ -39,5 +42,18 @@ class Toolshed {
     static function msgtrim($string) {
         return substr(json_encode(Bencode::decode($string)), 0, 50);
     }
+
+    static function sqlite_column_fetch($database, $table = 'peerstats') {
+
+        $table_info = $database->query("PRAGMA table_info($table)")->fetchAll();
+
+        foreach ($table_info as $sqlite => $column) {
+            $sqlcol[$column['name']] = true;
+        }
+
+        return $sqlcol;
+    }
+
+
 }
 

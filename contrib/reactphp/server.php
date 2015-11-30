@@ -7,23 +7,105 @@ use Cjdns\Api\Api;
 use Cjdns\Config\Admin;
 use Cjdns\Toolshed\Toolshed;
 
-use React\Espresso\Application as Espresso;
+/*******************************************************************/
 
-$app  = new Espresso;
-$addr = '127.0.0.1';
+/* HTTP Server */
+$addr = 'fc5d:ac93:74a5:7217:bb2b:6091:42a0:218';
 $port = 1337;
 
-/* Either set cjdns admin connection details in-file */
+/* Database */
+// $database = new medoo([
+
+$database = new medoo([
+    'database_type' => 'sqlite',
+    'database_file' => 'peers.sqlite',
+    'charset'       => 'utf8',
+    'enabled'       => true
+]);
+
+/* Debuggery
+$database->query("drop table peerstats");
+*/
+
+$database->query("create table peerstats(
+    id                 integer primary key,
+    date               datetime default current_timestamp,
+    addr               varchar(39) default 'fc00::1',
+    bytesIn            varchar(16),
+    bytesOut           varchar(16),
+    duplicates         varchar(2),
+    isIncoming         tinyint,
+    last               integer,
+    lostPackets        integer,
+    publicKey          varchar(54),
+    receivedOutOfRange tinyint,
+    recvKbps           integer,
+    sendKbps           integer,
+    state              varchar(15),
+    switchLabel        varchar(19),
+    user               varchar(20),
+    version            integer
+);");
+
+/* Authorization to cjdns-admin can be set in-file */
 $cfg = new Admin([
     'addr' => '127.0.0.1',
     'password' => 'YRZNhY4QCgUUFDnwQXGxoyuh9aaXvrNW6Tyl78JG',
     'port' => 11234,
 ]);
 
-/* or use cjdns admin connection details in file as json object  */
+/* Authorization to cjdns-admin can also be retreived from json file */
 $cfg = new Admin(['cfgfile' => '/home/igel/.cjdnsadmin']);
 
-$app->get('/nodes', function ($request, $response) use ($cfg) {
+/*******************************************************************/
+
+$app = new Phluid\App([ 'default_layout' => 'layout' ]);
+$app->inject(new \Phluid\Middleware\ExceptionHandler('exception'));
+
+$app->inject(new \Phluid\Middleware\RequestTimer());
+$app->inject(function($request, $response, $next) {
+    $response->once('end', function() use ($request, $response) {
+        echo "$request $response in $request->duration ms" . PHP_EOL . PHP_EOL;
+    });
+    $next();
+});
+
+$app->inject(function($req, $res, $next) {
+    $res->setHeader('X-Powered-By', 'ReactPHP');
+    $next();
+});
+
+/*******************************************************************/
+
+// $app->inject(new \Phluid\Middleware\StaticFiles(__DIR__ . '/public'));
+
+$app->get('/', function($req, $res) {
+    $res->render('home');
+});
+
+$app->get('/exit', function ($request, $response) use ($cfg) {
+    echo Toolshed::logger('Incoming: /exit');
+    exit();
+});
+
+$app->get('/nodes/:blah', function ($request, $response, $blah) use ($cfg, $database) {
+
+    $response->renderText( "Hello {$request->param('blah')}");
+    echo Toolshed::logger('Incoming: /nodes');
+
+    $data = Api::InterfaceController_peerStats();
+    $Socket = new Socket($cfg);
+    $Socket->authput($data);
+
+    echo PHP_EOL;
+    $res->render('home');
+    return $response->end(json_encode(Api::decode($Socket->message)));
+
+});
+
+/*******************************************************************/
+
+$app->get('/nodes', function ($request, $response) use ($cfg, $database) {
 
     echo Toolshed::logger('Incoming: /nodes');
     $response->writeHead(200, array('Content-Type' => 'text/plain'));
@@ -32,13 +114,53 @@ $app->get('/nodes', function ($request, $response) use ($cfg) {
     $Socket = new Socket($cfg);
     $Socket->authput($data);
 
-    echo PHP_EOL;
-    return $response->end(json_encode(Api::decode($Socket->message)));
+    $response->end(json_encode(Api::decode($Socket->message)));
 
+    if ($database->enabled) {
+
+        $date = new Datetime('now');
+        $date = $date->format(DateTime::ISO8601);
+
+        $columns = Toolshed::sqlite_column_fetch($database, 'peerstats');
+        $message = Api::decode($Socket->message);
+
+        $peerstats_data  = ($message['peers']) ? : [];
+        $peerstats_total = ($message['total']) ? : 0;
+
+
+        /************************************************/
+        /* Returns an array of valid fields for sqlite */
+        /************************************************/
+        $valid_fields = function($a) use ($columns) {
+            foreach ($columns as $name => $true) {
+                if (isset($a[$name])) {
+                    $res[$name] = $a[$name];
+                }
+            }
+            return $res;
+        };
+
+        /* Build the array */
+        for ($i=0; $i < $peerstats_total; $i++) {
+            /* date mutates to ISO8601 (2015-11-29T18:51:21-0500) */
+            $peerstats_data[$i]['date'] = $date;
+            $cherrypick_data[$i] = call_user_func($valid_fields, $peerstats_data[$i]);
+        }
+
+        $id = $database->insert("peerstats", $cherrypick_data );
+
+        /* if ($latest_peerstats_table) */
+        foreach ($id as $latest_peerstats) {
+            /* Create a table for status webpage ie //www.fc00.h/current-peers */
+            // $database->insert("peerstats_status", $cherrypick_data, "where publickey == publickey" );
+        }
+    }
+
+    return;
 });
 
 /* Available Functions */
-$app->get('/help', function ($request, $response) {
+$app->get('/help', function ($request, $response) use ($cfg) {
 
     echo Toolshed::logger('Incoming: /help');
     $response->writeHead(200, array('Content-Type' => 'text/plain'));
@@ -771,6 +893,4 @@ $app->get('/UDPInterface_new', function ($request, $response) use ($cfg) {
 });
 
 echo Toolshed::logger('ReactPHP Admin started http://'.$addr.':'.$port);
-
-$stack = new React\Espresso\Stack($app);
-$stack->listen($port, $addr);
+$app->listen($port, $addr);
