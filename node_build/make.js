@@ -415,8 +415,9 @@ Builder.configure({
             callback('', false);
             return;
         }
-
-        Codestyle.lint(fileName, file, callback);
+        if (!process.env['NO_CODESTYLE']) {
+            Codestyle.lint(fileName, file, callback);
+        }
     });
 
     var testcjdroute = builder.buildTest('test/testcjdroute.c');
