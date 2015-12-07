@@ -18,6 +18,7 @@
 #include "benc/Dict.h"
 #include "benc/List.h"
 #include "exception/Except.h"
+#include "exception/Jmp.h"
 #include "wire/Message.h"
 #include "util/Base10.h"
 
@@ -64,6 +65,25 @@ static void writeDict(Dict* d, struct Message* msg, struct Except* eh)
     Message_push8(msg, 'e', eh);
     writeDictEntries(*d, msg, eh);
     Message_push8(msg, 'd', eh);
+}
+
+/**
+ * Tries to send a message same as in writeDic() but in case of some problems
+ * where it would throw, it instead returns non-zero value to indicate error:
+ * return 1 - there was an error
+ * return 0 - no error was detected, but still no guarantee if message was sent,
+ * some errors like message not fitting UDP-admin-packet size are NOT detected
+ * (therefore you should detect them in caller function)
+ */
+int BencMessageWriter_writeDictTry(Dict* d, struct Message* msg, struct Except* eh)
+{
+    struct Jmp jmp;
+    Jmp_try(jmp) {
+        writeDict(d, msg, &jmp.handler);
+        return 0;
+    } Jmp_catch {
+        return 1;
+    }
 }
 
 static void writeGeneric(Object* obj, struct Message* msg, struct Except* eh)
