@@ -207,20 +207,22 @@ A conf file with multiple friend-nodes, setup OUTbound, should look like:
 // Nodes to connect to.
 "connectTo":
 {
-    //friend_1 (IPv4: 0.1.2.3; IPv6 fcaa:5bac:66e4:713:cb00:e446:c317:fc39)
+    // friend_1 (IPv4: 0.1.2.3; IPv6 fcaa:5bac:66e4:713:cb00:e446:c317:fc39)
     "0.1.2.3:45678":
     {
-        "login": "k.alexander"
+        "login": "k.alexander",
         "password": "thisIsNotARealConnection_1",
-        "publicKey": "thisIsJustForAnExampleDoNotUseThisInYourConfFile_1.k"
+        "publicKey": "thisIsJustForAnExampleDoNotUseThisInYourConfFile_1.k",
+        "peerName": "friend_1"
     }
 
-    //friend_2 (IPv4: 5.1.2.3; IPv6 fcbb:5bac:66e4:713:cb00:e446:c317:fc39)
+    // friend_2 (IPv4: 5.1.2.3; IPv6 fcbb:5bac:66e4:713:cb00:e446:c317:fc39)
     "5.1.2.3:5678":
     {
-        "login": "k.alexander"
+        "login": "k.alexander",
         "password": "thisIsNotARealConnection_2",
-        "publicKey": "thisIsJustForAnExampleDoNotUseThisInYourConfFile_2.k"
+        "publicKey": "thisIsJustForAnExampleDoNotUseThisInYourConfFile_2.k",
+        "peerName": "friend_2"
     }
 }
 ```
