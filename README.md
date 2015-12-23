@@ -192,7 +192,7 @@ a look at the [Hyperboria Map][] to find peers near you.
 
 In your conf file, you will see:
 
-``` javascript
+```javascript
 // Nodes to connect to.
 "connectTo":
 {
@@ -203,24 +203,26 @@ In your conf file, you will see:
 
 A conf file with multiple friend-nodes, setup OUTbound, should look like:
 
-``` javascript
+```javascript
 // Nodes to connect to.
 "connectTo":
 {
-    //friend_1 (IPv4: 0.1.2.3; IPv6 fcaa:5bac:66e4:713:cb00:e446:c317:fc39)
+    // friend_1 (IPv4: 0.1.2.3; IPv6 fcaa:5bac:66e4:713:cb00:e446:c317:fc39)
     "0.1.2.3:45678":
     {
-        "login": "k.alexander"
+        "login": "k.alexander",
         "password": "thisIsNotARealConnection_1",
-        "publicKey": "thisIsJustForAnExampleDoNotUseThisInYourConfFile_1.k"
+        "publicKey": "thisIsJustForAnExampleDoNotUseThisInYourConfFile_1.k",
+        "peerName": "friend_1"
     }
 
-    //friend_2 (IPv4: 5.1.2.3; IPv6 fcbb:5bac:66e4:713:cb00:e446:c317:fc39)
+    // friend_2 (IPv4: 5.1.2.3; IPv6 fcbb:5bac:66e4:713:cb00:e446:c317:fc39)
     "5.1.2.3:5678":
     {
-        "login": "k.alexander"
+        "login": "k.alexander",
         "password": "thisIsNotARealConnection_2",
-        "publicKey": "thisIsJustForAnExampleDoNotUseThisInYourConfFile_2.k"
+        "publicKey": "thisIsJustForAnExampleDoNotUseThisInYourConfFile_2.k",
+        "peerName": "friend_2"
     }
 }
 ```
@@ -232,11 +234,11 @@ following JSON syntax.
 **To allow your friend to initiate the connection INbound**
 
 In your conf file, you will see:
-``` javascript
+```javascript
 "authorizedPasswords":
 [
     // A unique string which is known to the client and server.
-    {"password": "thisisauniquestring_001"}
+    {"password": "thisisauniquestring_001", "user": "default-login"}
 
     // More passwords should look like this.
     // {"password": "thisisauniquestring_002"}
@@ -244,42 +246,62 @@ In your conf file, you will see:
     // {"password": "thisisauniquestring_004"}
     ...
 
-    // "your.external.ip.goes.here:45678":{"password": "thisisauniquestring_001","publicKey":thisisauniqueKEY_001.k"}
-
+    /*
+    "your.external.ip.goes.here:56789": {
+        "login": "default-login",
+        "password": "thisisauniquestring_001",
+        "publicKey": "thisisauniquekey_001.k",
+        "peerName": "your.nodes.name.goes.here"
+    }
+    */
 ],
 ```
 
 A conf file with multiple friend-nodes, setup INbound, should look like:
-``` javascript
+```javascript
 "authorizedPasswords":
 [
     // A unique string which is known to the client and server.
-    {"password": "thisisauniquestring_001", "user": "k.alexander"}
+    {"password": "thisisauniquestring_001", "user": "k.alexander"},
+
+    // William Jevons (IPv4: 0.1.2.3; IPv6 fcaa:5bac:66e4:713:cb00:e446:c317:fc39)
+    {"password": "thisisauniquestring_002", "user": "William Jevons"},
+
+    // Marilyn Patel (IPv4: 5.1.2.3; IPv6 fcbb:5bac:66e4:713:cb00:e446:c317:fc39)
+    {"password": "thisisauniquestring_003", "user": "Marilyn Patel"}
 
     // More passwords should look like this.
-    //William Jevons (IPv4: 0.1.2.3; IPv6 fcaa:5bac:66e4:713:cb00:e446:c317:fc39)
-{"password": "thisisauniquestring_002", "user": "William Jevons"}
-    //Marilyn Patel (IPv4: 5.1.2.3; IPv6 fcbb:5bac:66e4:713:cb00:e446:c317:fc39)
-{"password": "thisisauniquestring_003", "user": "Marilyn Patel"}
     // {"password": "thisisauniquestring_004"}
     ...
 
-    // "your.external.ip.goes.here:45678":{"password": "thisisauniquestring_001","publicKey":thisisauniqueKEY_001.k"}
+    /*
+    "your.external.ip.goes.here:56789": {
+        "login": "k.alexander",
+        "password": "thisisauniquestring_001",
+        "publicKey": "thisisauniquekey_001.k",
+        "peerName": "your.nodes.name.goes.here"
+    }
+    */
 ],
 ```
 
 
-You need to give William Jevons (who is making the INbound connection) the following 4 items:
+You need to give William Jevons (who is making the INbound connection) the following items:
 
 1. Your external IPv4
 2. The port found in your conf file here:
 
-    `// Bind to this port.
-    "bind": "0.0.0.0:yourportnumberishere",`
+    ```javascript
+    // Bind to this port.
+    "bind": "0.0.0.0:yourportnumberishere",
+    ```
 
-3. Their unique password that you uncommented or created: "password": "thisisauniquestring_002"
-4. Your public key: "publicKey":thisisauniqueKEY_001.k"
-5. His username: "William Jevons"
+    Make sure UDP traffic is allowed through this port if you have a firewall configured.
+
+3. His username: `"login": "William Jevons"`
+4. His unique password that you uncommented or created: `"password": "thisisauniquestring_002"`
+5. Your public key: `"publicKey": "thisisauniquekey_001.k"`
+6. Your node's name: `"peerName": "your.nodes.name.goes.here"`
 
 His login credentials will look something like this (with your IPv4 and port):
 
@@ -287,15 +309,14 @@ His login credentials will look something like this (with your IPv4 and port):
 "1.2.3.4:56789": {
     "login": "William Jevons",
     "password": "thisisauniquestring_002",
-    "publicKey": "thisIsJustForAnExampleDoNotUseThisInYourConfFile_1.k"
+    "publicKey": "thisisauniquekey_001.k",
+    "peerName": "k.alexanders.node"
 }
 ```
-
 
 Please note that you and your friend can *initiate* a
 connection either outbound (from YOU --> FRIEND) or inbound (from FRIEND --> YOU)
 but traffic flows both ways once the connection is established.
-
 
 See [doc/configure.md](doc/configure.md) for more details on configuration,
 including how to peer with other cjdns nodes over ethernet and wifi.
