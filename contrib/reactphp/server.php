@@ -14,7 +14,6 @@ $addr = 'fc5d:ac93:74a5:7217:bb2b:6091:42a0:218';
 $port = 1337;
 
 /* Database */
-// $database = new medoo([
 
 $database = new medoo([
     'database_type' => 'sqlite',
@@ -30,7 +29,7 @@ $database->query("drop table peerstats");
 $database->query("create table peerstats(
     id                 integer primary key,
     date               datetime default current_timestamp,
-    addr               varchar(39) default 'fc00::1',
+    addr               varchar(39),
     bytesIn            varchar(16),
     bytesOut           varchar(16),
     duplicates         varchar(2),
@@ -892,5 +891,5 @@ $app->get('/UDPInterface_new', function ($request, $response) use ($cfg) {
     return $response->end(json_encode(Api::decode($Socket->message)));
 });
 
-echo Toolshed::logger('ReactPHP Admin started http://'.$addr.':'.$port);
+echo Toolshed::logger('ReactPHP Admin started http://['.$addr.']:'.$port);
 $app->listen($port, $addr);
