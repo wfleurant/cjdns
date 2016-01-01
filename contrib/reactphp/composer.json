@@ -14,7 +14,9 @@
         "ext-pdo_sqlite": "*",
         "phluid/phluid": "master-dev",
         "react/datagram": "dev-master",
-        "catfan/Medoo": "dev-master"
+        "catfan/Medoo": "dev-master",
+        "gabrielelana/byte-units": "^0.3.0",
+        "nesbot/carbon": "^1.20"
     },
     "autoload": {
         "psr-4": {

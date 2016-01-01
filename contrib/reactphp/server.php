@@ -14,7 +14,6 @@ $addr = 'fc5d:ac93:74a5:7217:bb2b:6091:42a0:218';
 $port = 1337;
 
 /* Database */
-
 $database = new medoo([
     'database_type' => 'sqlite',
     'database_file' => 'peers.sqlite',
@@ -76,17 +75,32 @@ $app->inject(function($req, $res, $next) {
 
 /*******************************************************************/
 
-// $app->inject(new \Phluid\Middleware\StaticFiles(__DIR__ . '/public'));
+/* for middleware files in ./views/public/
+    $app->inject(new \Phluid\Middleware\StaticFiles(__DIR__ . '/public'));
+   see: https://github.com/beaucollins/phluid-php#middleware
+*/
 
-$app->get('/', function($req, $res) {
-    $res->render('home');
+$app->get('/', function($req, $res) use ($cfg) {
+
+    $obj = new stdclass();
+
+    $obj->Toolshed = new Toolshed;
+
+    $data = Api::InterfaceController_peerStats();
+    $Socket = new Socket($cfg);
+    $Socket->authput($data);
+    $obj->peerstats = Api::decode($Socket->message);
+
+    $res->render('home', [ 'obj' => $obj ]);
+
 });
 
 $app->get('/exit', function ($request, $response) use ($cfg) {
     echo Toolshed::logger('Incoming: /exit');
-    exit();
+    // exit();
 });
 
+/* Here's an example of a bag of blah parameters */
 $app->get('/nodes/:blah', function ($request, $response, $blah) use ($cfg, $database) {
 
     $response->renderText( "Hello {$request->param('blah')}");
@@ -96,8 +110,6 @@ $app->get('/nodes/:blah', function ($request, $response, $blah) use ($cfg, $data
     $Socket = new Socket($cfg);
     $Socket->authput($data);
 
-    echo PHP_EOL;
-    $res->render('home');
     return $response->end(json_encode(Api::decode($Socket->message)));
 
 });
