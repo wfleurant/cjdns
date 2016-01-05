@@ -339,9 +339,6 @@ Builder.configure({
             }
 
             //args.push('--root-target=libuv');
-            if (android) {
-                args.push('-DOS=android');
-            }
 
             if (builder.config.systemName === 'win32') {
                 args.push('-DOS=win');
@@ -354,6 +351,12 @@ Builder.configure({
             if (['freebsd', 'openbsd'].indexOf(builder.config.systemName) !== -1) {
                 // This platform lacks a functioning sem_open implementation, therefore...
                 args.push('--no-parallel');
+            }
+
+            if (android) {
+                args.push('-DOS=android');
+                args.push('-f');
+                args.push('make-android');
             }
 
             var gyp = Spawn(python, args, {env:env, stdio:'inherit'});
