@@ -58,9 +58,11 @@ $cfg = new Admin(['cfgfile' => '/home/igel/.cjdnsadmin']);
 /*******************************************************************/
 
 $app = new Phluid\App([ 'default_layout' => 'layout' ]);
+
 $app->inject(new \Phluid\Middleware\ExceptionHandler('exception'));
 
 $app->inject(new \Phluid\Middleware\RequestTimer());
+
 $app->inject(function($request, $response, $next) {
     $response->once('end', function() use ($request, $response) {
         echo "$request $response in $request->duration ms" . PHP_EOL . PHP_EOL;
@@ -79,6 +81,10 @@ $app->inject(function($req, $res, $next) {
     $app->inject(new \Phluid\Middleware\StaticFiles(__DIR__ . '/public'));
    see: https://github.com/beaucollins/phluid-php#middleware
 */
+
+$app->inject(new \Phluid\Middleware\StaticFiles(__DIR__ . '/views/js'));
+$app->inject(new \Phluid\Middleware\StaticFiles(__DIR__ . '/views/css'));
+$app->inject(new \Phluid\Middleware\StaticFiles(__DIR__ . '/views/img'));
 
 $app->get('/', function($req, $res) use ($cfg) {
 
@@ -195,7 +201,6 @@ $app->get('/help', function ($request, $response) use ($cfg) {
 
     echo PHP_EOL;
     return $response->end(Toolshed::cleanresp($result, $flatten=true, $droptxrx=true));
-
 });
 
 /* Authenticated Ping */
@@ -224,7 +229,6 @@ $app->get('/ping', function ($request, $response) use ($cfg) {
 
     echo PHP_EOL;
     return $response->end(json_encode(Api::decode($Socket->message)));
-
 });
 
 /*******************/
