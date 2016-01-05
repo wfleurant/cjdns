@@ -110,7 +110,6 @@ $app->get('/exit', function ($request, $response) use ($cfg) {
 $app->get('/nodes/:blah', function ($request, $response, $blah) use ($cfg, $database) {
 
     $response->renderText( "Hello {$request->param('blah')}");
-    echo Toolshed::logger('Incoming: /nodes');
 
     $data = Api::InterfaceController_peerStats();
     $Socket = new Socket($cfg);
@@ -124,16 +123,20 @@ $app->get('/nodes/:blah', function ($request, $response, $blah) use ($cfg, $data
 
 $app->get('/nodes', function ($request, $response) use ($cfg, $database) {
 
-    echo Toolshed::logger('Incoming: /nodes');
+
+    $method = $request->param('q');
     $response->writeHead(200, array('Content-Type' => 'text/plain'));
 
-    $data = Api::InterfaceController_peerStats();
-    $Socket = new Socket($cfg);
-    $Socket->authput($data);
-
-    $response->end(json_encode(Api::decode($Socket->message)));
-
+    /* todo:
+        $database_closure('nodes', $obj);
+    */
     if ($database->enabled) {
+
+        /* if $param == nodes */
+        $data = Api::InterfaceController_peerStats();
+        $Socket = new Socket($cfg);
+        $Socket->authput($data);
+        /**/
 
         $date = new Datetime('now');
         $date = $date->format(DateTime::ISO8601);
@@ -171,6 +174,76 @@ $app->get('/nodes', function ($request, $response) use ($cfg, $database) {
             /* Create a table for status webpage ie //www.fc00.h/current-peers */
             // $database->insert("peerstats_status", $cherrypick_data, "where publickey == publickey" );
         }
+
+    }
+
+    if ($method) {
+
+        echo Toolshed::logger('Incoming: /nodes with method: ' . $method);
+        $respdata = [ 'response' => 'Unknown Method' ];
+
+        if ($method == 'nodes') {
+            /* get, parse-for-humans, return for front-end */
+
+            $data = Api::InterfaceController_peerStats();
+            $Socket = new Socket($cfg);
+            $Socket->authput($data);
+            $respdata = Api::decode($Socket->message);
+            $rdata = [];
+
+            foreach ($respdata['peers'] as $idx => $value) {
+
+                // Connectivity
+                $rdata[$idx][ 'state' ] = $value['state'];
+
+                // cjdns Address
+                $rdata[$idx]['ipv6'] = Toolshed::parse_peerstats($value['addr'])['ipv6'];
+
+                // Total RX
+                $rdata[$idx]['bytesIn'] = \ByteUnits\bytes($value['bytesIn'])->format(null, '&nbsp;');
+
+                // Total TX
+                $rdata[$idx]['bytesOut'] = \ByteUnits\bytes($value['bytesOut'])->format(null, '&nbsp;');
+
+                // RX Speed
+                $rdata[$idx]['recvKbps'] = number_format($value['recvKbps']/1000, 3) . ' mbps';
+
+                // TX Speed
+                $rdata[$idx]['sendKbps'] = number_format($value['sendKbps']/1000, 3) . ' mbps';
+
+                // Last Pkt
+                $rdata[$idx]['last'] = Carbon\Carbon::now('UTC')->diffForHumans(
+                                    Carbon\Carbon::createFromTimeStampUTC(
+                                        round($value['last'] / 1000)), TRUE);
+
+                // Public Key
+                $rdata[$idx]['publicKey'] = $value['publicKey'];
+
+            }
+
+            $response->end(json_encode([ 'peers' => $rdata ]));
+
+
+        } else if ($method == 'chodes') {
+            /* do blah */
+            $response->end(json_encode($respdata));
+
+        } else {
+
+            echo Toolshed::logger('Incoming: /nodes but an unknown method');
+            $response->end(json_encode($respdata));
+        }
+
+    } else {
+
+        echo Toolshed::logger('Incoming: /nodes');
+
+        $data = Api::InterfaceController_peerStats();
+        $Socket = new Socket($cfg);
+        $Socket->authput($data);
+
+        $response->end(json_encode(Api::decode($Socket->message)));
+
     }
 
     return;

@@ -19,9 +19,8 @@ class Toolshed {
     /* */
     static function publictoip6($pubkey = false) {
         if (!$pubkey) { return false; }
-
         $bin = '../../publictoip6 ';
-        $h   = popen($bin . $pubkey, r);
+        $h   = popen($bin . $pubkey, 'r');
         $ip6 = trim(fread($h, 39));
 
         pclose($h);

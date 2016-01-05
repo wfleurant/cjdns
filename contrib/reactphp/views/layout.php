@@ -95,25 +95,11 @@
 
 <body>
 
-<?php echo '<center><pre>' . $obj->Toolshed->ascii_logo() . '</pre></center><hr>'; ?>
+  <?php echo '<center><pre>' . $obj->Toolshed->ascii_logo() . '</pre></center><hr>'; ?>
 
-<center>
+  <center>
 
-<!-- Todo:
-    utilize front-end functions on the API query to return humnan-
-    readable and parse_peerstats() rows Seen on the 1-time page load
-
-    Connectivity
-    cjdns Address
-    Total RX
-    Total TX
-    RX Speed
-    TX Speed
-    Last Pkt
-    Public Key
--->
-
-<table id="peerstats-table"
+  <table id="peerstats-table"
     data-pagination="false"
     data-search="false"
     data-classes="table"
@@ -128,9 +114,9 @@
             <th data-field="state"     data-sortable="true" class="col-md-0">
                 Connectivity
             </th>
-            <!-- <th data-field="addr"      data-sortable="true" class="col-md-0"> -->
-                <!-- cjdns Address -->
-            <!-- </th> -->
+            <th data-field="ipv6"      data-sortable="true" class="col-md-0">
+                cjdns Address
+            </th>
             <th data-field="bytesIn"   data-sortable="true" class="col-md-0">
                 Total RX
             </th>
@@ -152,56 +138,10 @@
 
         </tr>
     </thead>
-</table>
+  </table>
 
-<hr>
+  </center>
 
-
-<table border="1">
-
-  <thead>
-    <tr>
-        <th>Connectivity</th>
-        <th>cjdns Address</th>
-        <th>Total RX</th>
-        <th>Total TX</th>
-        <th>RX Speed</th>
-        <th>TX Speed</th>
-        <th>Last Pkt</th>
-        <th>Public Key</th>
-    </tr>
-  </thead>
-
-  <tbody>
-  <?php
-  foreach ($obj->peerstats['peers'] as $key => $value) {
-    echo "<tr>";
-
-        echo "<td>" . $value['state']       . "</td>";
-
-        echo "<td>" . $obj->Toolshed
-                          ->parse_peerstats($value['addr'])['ipv6'] . "</td>";
-
-        echo "<td>" . \ByteUnits\bytes($value['bytesIn'])->format(null, '&nbsp;')  . "</td>";
-
-        echo "<td>" . \ByteUnits\bytes($value['bytesOut'])->format(null, '&nbsp;') . "</td>";
-
-        echo "<td>" . number_format($value['recvKbps']/1000, 3) . "&nbsp;mbps</td>";
-
-        echo "<td>" . number_format($value['sendKbps']/1000, 3) . "&nbsp;mbps</td>";
-
-        echo "<td>" . Carbon\Carbon::now('UTC')->diffForHumans(
-                        Carbon\Carbon::createFromTimeStampUTC(
-                            round($value['last'] / 1000)), TRUE) . "</td>";
-
-        echo "<td>" . $value['publicKey']   . "</td>";
-
-    echo "</tr>";
-
-  } ?>
-  </tbody>
-
-</table>
-</center>
+  <hr>
 
 </body>
