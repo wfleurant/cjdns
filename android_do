@@ -57,14 +57,14 @@ if [ "$NDK" == "/bad/path/to/android-ndk-r10e/" ]; then
   fi
 fi
 
-$NDK/build/tools/make-standalone-toolchain.sh --platform=android-21 --toolchain=arm-linux-androideabi-4.9 --install-dir=$BUILD_PATH/arm-${TYPE}-androideabi/ --system=${TYPE}-${cpu_arch}
-$NDK/build/tools/make-standalone-toolchain.sh --platform=android-21 --toolchain=x86-4.9 --install-dir=$BUILD_PATH/i686-${TYPE}-androideabi/ --system=${TYPE}-${cpu_arch}
+$NDK/build/tools/make-standalone-toolchain.sh --platform=android-9 --toolchain=arm-linux-androideabi-4.9 --install-dir=$BUILD_PATH/arm-${TYPE}-androideabi/ --system=${TYPE}-${cpu_arch}
+$NDK/build/tools/make-standalone-toolchain.sh --platform=android-9 --toolchain=x86-4.9 --install-dir=$BUILD_PATH/i686-${TYPE}-androideabi/ --system=${TYPE}-${cpu_arch}
 
 Seccomp_NO=1
 
-mkdir $(pwd)/android_out
-mkdir $(pwd)/android_out/armeabi-v7a
-mkdir $(pwd)/android_out/x86
+mkdir $(pwd)/build_android/out
+mkdir $(pwd)/build_android/out/armeabi-v7a
+mkdir $(pwd)/build_android/out/x86
 
 #arm build
 rm -rf build_linux
@@ -87,7 +87,7 @@ echo Compiler CC: $CC
 echo Compiler CFLAGS: $CFLAGS
 echo Compiler LDFLAGS: $LDFLAGS
 time ./do
-cp cjdroute $(pwd)/android_out/armeabi-v7a/ || ret=$?
+cp cjdroute $(pwd)/build_android/out/armeabi-v7a/ || ret=$?
 
 if [ "$ret" != "" ] && [ "$ret" != "0" ]; then
   echo -e "\e[1;31mCopying armeabi-v7a binary failed, non zero status returned - $ret\e[0m"
@@ -118,7 +118,7 @@ echo Compiler CFLAGS: $CFLAGS
 echo Compiler LDFLAGS: $LDFLAGS
 time ./do
 
-cp cjdroute $(pwd)/android_out/x86/ || ret=$?
+cp cjdroute $(pwd)/build_android/out/x86/ || ret=$?
 
 if [ "$ret" != "" ] && [ "$ret" != "0" ]; then
   echo -e "\e[1;31mCopying x86 binary failed, non zero status returned - $ret\e[0m"
@@ -128,7 +128,7 @@ fi
 
 rm cjdroute
 
-echo -e "\n\e[1;34mOutput: $(pwd)/android_out/armeabi-v7a/cjdroute\e[0m"
-echo -e "\e[1;34m        $(pwd)/android_out/x86/cjdroute\e[0m"
+echo -e "\n\e[1;34mOutput: $(pwd)/build_android/out/armeabi-v7a/cjdroute\e[0m"
+echo -e "\e[1;34m        $(pwd)/build_android/out/x86/cjdroute\e[0m"
 
 exit $ret
