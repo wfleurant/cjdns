@@ -168,7 +168,7 @@ int InterfaceController_beaconState(struct InterfaceController* ifc,
  *
  * @param ic the if controller
  * @param herPublicKey the public key of the foreign node
- * @retrun 0 if all goes well.
+ * @return 0 if all goes well.
  *         InterfaceController_disconnectPeer_NOTFOUND if no peer with herPublicKey is found.
  */
 #define InterfaceController_disconnectPeer_NOTFOUND -1
