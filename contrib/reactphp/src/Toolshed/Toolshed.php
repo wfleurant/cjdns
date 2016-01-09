@@ -96,7 +96,7 @@ class Toolshed {
 
     static function sqlite_column_fetch($database, $table = 'peerstats') {
 
-        $table_info = $database->query("PRAGMA table_info($table)")->fetchAll();
+        $table_info = $database->database->query("PRAGMA table_info($table)")->fetchAll();
 
         foreach ($table_info as $sqlite => $column) {
             $sqlcol[$column['name']] = true;

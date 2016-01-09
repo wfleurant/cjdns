@@ -6,6 +6,7 @@ use Cjdns\Admin\Socket;
 use Cjdns\Api\Api;
 use Cjdns\Config\Admin;
 use Cjdns\Toolshed\Toolshed;
+use Cjdns\Toolshed\SQLite;
 
 /*******************************************************************/
 
@@ -13,37 +14,9 @@ use Cjdns\Toolshed\Toolshed;
 $addr = 'fc5d:ac93:74a5:7217:bb2b:6091:42a0:218';
 $port = 1337;
 
-/* Database */
-$database = new medoo([
-    'database_type' => 'sqlite',
-    'database_file' => 'peers.sqlite',
-    'charset'       => 'utf8',
-    'enabled'       => true
-]);
+// /* Database */
 
-/* Debuggery
-$database->query("drop table peerstats");
-*/
-
-$database->query("create table peerstats(
-    id                 integer primary key,
-    date               datetime default current_timestamp,
-    addr               varchar(39),
-    bytesIn            varchar(16),
-    bytesOut           varchar(16),
-    duplicates         varchar(2),
-    isIncoming         tinyint,
-    last               integer,
-    lostPackets        integer,
-    publicKey          varchar(54),
-    receivedOutOfRange tinyint,
-    recvKbps           integer,
-    sendKbps           integer,
-    state              varchar(15),
-    switchLabel        varchar(19),
-    user               varchar(20),
-    version            integer
-);");
+$database = new SQLite;
 
 /* Authorization to cjdns-admin can be set in-file */
 $cfg = new Admin([
@@ -103,19 +76,26 @@ $app->get('/', function($req, $res) use ($cfg) {
 
 $app->get('/exit', function ($request, $response) use ($cfg) {
     echo Toolshed::logger('Incoming: /exit');
-    // exit();
+    exit();
 });
 
-/* Here's an example of a bag of blah parameters */
-$app->get('/nodes/:blah', function ($request, $response, $blah) use ($cfg, $database) {
+/* Here's an example of a bag of pubkey parameters */
+$app->get('/nodes/:pubkey', function ($request, $response, $pubkey) use ($cfg, $database) {
 
-    $response->renderText( "Hello {$request->param('blah')}");
+    /* public key of node */
+    $pubkey = $request->param('pubkey');
 
-    $data = Api::InterfaceController_peerStats();
-    $Socket = new Socket($cfg);
-    $Socket->authput($data);
+    /* later, use between dates */
+    $date = [ 'from' => '2015-01-01',
+              'to'   => '2016-01-01'];
 
-    return $response->end(json_encode(Api::decode($Socket->message)));
+    $date = 'recent';
+    if ($pubkey == 'valid') {
+        $var = SQLite::report($from, $until, $pubkey);
+        return $response->end(json_encode($var));
+    } else {
+        return $response->end(json_encode(['error']));
+    }
 
 });
 
@@ -123,78 +103,33 @@ $app->get('/nodes/:blah', function ($request, $response, $blah) use ($cfg, $data
 
 $app->get('/nodes', function ($request, $response) use ($cfg, $database) {
 
-
+    echo "::made it here::";
+    /******/
     $method = $request->param('q');
     $response->writeHead(200, array('Content-Type' => 'text/plain'));
+    /******/
 
-    /* todo:
-        $database_closure('nodes', $obj);
-    */
-    if ($database->enabled) {
+    $data = Api::InterfaceController_peerStats();
+    $Socket = new Socket($cfg);
+    $Socket->authput($data);
+    $respdata = Api::decode($Socket->message);
 
-        /* if $param == nodes */
-        $data = Api::InterfaceController_peerStats();
-        $Socket = new Socket($cfg);
-        $Socket->authput($data);
-        /**/
-
-        $date = new Datetime('now');
-        $date = $date->format(DateTime::ISO8601);
-
-        $columns = Toolshed::sqlite_column_fetch($database, 'peerstats');
-        $message = Api::decode($Socket->message);
-
-        $peerstats_data  = ($message['peers']) ? : [];
-        $peerstats_total = ($message['total']) ? : 0;
-
-
-        /************************************************/
-        /* Returns an array of valid fields for sqlite */
-        /************************************************/
-        $valid_fields = function($a) use ($columns) {
-            foreach ($columns as $name => $true) {
-                if (isset($a[$name])) {
-                    $res[$name] = $a[$name];
-                }
-            }
-            return $res;
-        };
-
-        /* Build the array */
-        for ($i=0; $i < $peerstats_total; $i++) {
-            /* date mutates to ISO8601 (2015-11-29T18:51:21-0500) */
-            $peerstats_data[$i]['date'] = $date;
-            $cherrypick_data[$i] = call_user_func($valid_fields, $peerstats_data[$i]);
-        }
-
-        $id = $database->insert("peerstats", $cherrypick_data );
-
-        /* if ($latest_peerstats_table) */
-        foreach ($id as $latest_peerstats) {
-            /* Create a table for status webpage ie //www.fc00.h/current-peers */
-            // $database->insert("peerstats_status", $cherrypick_data, "where publickey == publickey" );
-        }
-
-    }
+    $columns = $database->sqlite_column_fetch($database, 'peerstats');
+    $database->write('nodes', $columns, $respdata);
 
     if ($method) {
 
         echo Toolshed::logger('Incoming: /nodes with method: ' . $method);
-        $respdata = [ 'response' => 'Unknown Method' ];
 
         if ($method == 'nodes') {
             /* get, parse-for-humans, return for front-end */
 
-            $data = Api::InterfaceController_peerStats();
-            $Socket = new Socket($cfg);
-            $Socket->authput($data);
-            $respdata = Api::decode($Socket->message);
             $rdata = [];
 
             foreach ($respdata['peers'] as $idx => $value) {
 
                 // Connectivity
-                $rdata[$idx][ 'state' ] = $value['state'];
+                $rdata[$idx]['state'] = $value['state'];
 
                 // cjdns Address
                 $rdata[$idx]['ipv6'] = Toolshed::parse_peerstats($value['addr'])['ipv6'];
@@ -229,9 +164,8 @@ $app->get('/nodes', function ($request, $response) use ($cfg, $database) {
             $response->end(json_encode($respdata));
 
         } else {
-
             echo Toolshed::logger('Incoming: /nodes but an unknown method');
-            $response->end(json_encode($respdata));
+            $response->end(json_encode([[ 'response' => 'Unknown Method' ]]));
         }
 
     } else {
