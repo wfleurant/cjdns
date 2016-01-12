@@ -101,5 +101,32 @@ class SQLite {
         }
     }
 
-}
+    static function report($database, $date = false, $pubkey=false) {
 
+        $from   = $date['from'];
+        $until  = $date['until'];
+
+        $var = $database->database->select("peerstats",
+            [
+                "id", "date",
+                "addr", "bytesIn",
+                "bytesOut", "duplicates",
+                "isIncoming", "last",
+                "lostPackets", "publicKey",
+                "receivedOutOfRange", "recvKbps",
+                "sendKbps", "state",
+                "switchLabel", "user", "version"
+            ],
+                [
+                "AND" => [
+                    "publicKey" => $pubkey,
+                    "date[<>]"  => [ $from, $until ]
+                ],
+                "LIMIT" => [ 0, 10 ],
+            ]);
+
+        /*$database->database->log();*/
+        return $var;
+    }
+
+}

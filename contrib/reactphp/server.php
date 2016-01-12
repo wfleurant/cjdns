@@ -62,14 +62,7 @@ $app->inject(new \Phluid\Middleware\StaticFiles(__DIR__ . '/views/img'));
 $app->get('/', function($req, $res) use ($cfg) {
 
     $obj = new stdclass();
-
     $obj->Toolshed = new Toolshed;
-
-    $data = Api::InterfaceController_peerStats();
-    $Socket = new Socket($cfg);
-    $Socket->authput($data);
-    $obj->peerstats = Api::decode($Socket->message);
-
     $res->render('home', [ 'obj' => $obj ]);
 
 });
@@ -79,20 +72,53 @@ $app->get('/exit', function ($request, $response) use ($cfg) {
     exit();
 });
 
-/* Here's an example of a bag of pubkey parameters */
-$app->get('/nodes/:pubkey', function ($request, $response, $pubkey) use ($cfg, $database) {
+$app->get('/report', function ($request, $response, $pubkey) use ($cfg, $database) {
+
+    $response->writeHead(200, array('Content-Type' => 'text/plain'));
+
+    /* ... print available report dates (?) */
+    $v = 'Please use: /report/[publicKey] with parameters: ';
+    return $response->end($v);
+
+});
+
+$app->get('/report/:pubkey', function ($request, $response, $pubkey) use ($cfg, $database) {
 
     /* public key of node */
     $pubkey = $request->param('pubkey');
+    $response->writeHead(200, array('Content-Type' => 'text/plain'));
 
-    /* later, use between dates */
-    $date = [ 'from' => '2015-01-01',
-              'to'   => '2016-01-01'];
+    $method = $request->param('date');
+    if (!$method) {
+        $phrase = 'first day of this month';
+    } else {
+        /* choose default or print available report dates */
+    }
 
-    $date = 'recent';
-    if ($pubkey == 'valid') {
-        $var = SQLite::report($from, $until, $pubkey);
-        return $response->end(json_encode($var));
+    /* use between dates, or a phrase */
+
+    $phrase = 'first day of this month';
+
+    $from = \Carbon\Carbon::today('UTC');
+    $from = $from->modify($phrase)->toIso8601String();
+
+    $until = \Carbon\Carbon::yesterday('UTC')->toIso8601String();
+
+    $date = [
+        'from'   => $from,
+        'until'  => $until,
+        'phrase' => $phrase
+    ];
+
+    /************/
+    if ($pubkey) {
+        $var = SQLite::report($database, $date, $pubkey);
+
+        $v = json_encode($var);
+        /* debug */
+        // $v = \Vardump::singleton()->dump($var);
+
+        return $response->end($v);
     } else {
         return $response->end(json_encode(['error']));
     }
@@ -103,7 +129,6 @@ $app->get('/nodes/:pubkey', function ($request, $response, $pubkey) use ($cfg, $
 
 $app->get('/nodes', function ($request, $response) use ($cfg, $database) {
 
-    echo "::made it here::";
     /******/
     $method = $request->param('q');
     $response->writeHead(200, array('Content-Type' => 'text/plain'));
@@ -122,7 +147,7 @@ $app->get('/nodes', function ($request, $response) use ($cfg, $database) {
         echo Toolshed::logger('Incoming: /nodes with method: ' . $method);
 
         if ($method == 'nodes') {
-            /* get, parse-for-humans, return for front-end */
+            /* This method returns a parsed-for-humans view for a front-end */
 
             $rdata = [];
 
@@ -148,8 +173,8 @@ $app->get('/nodes', function ($request, $response) use ($cfg, $database) {
 
                 // Last Pkt
                 $rdata[$idx]['last'] = Carbon\Carbon::now('UTC')->diffForHumans(
-                                    Carbon\Carbon::createFromTimeStampUTC(
-                                        round($value['last'] / 1000)), TRUE);
+                                        Carbon\Carbon::createFromTimeStampUTC(
+                                          round($value['last'] / 1000)), TRUE);
 
                 // Public Key
                 $rdata[$idx]['publicKey'] = $value['publicKey'];
