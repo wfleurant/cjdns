@@ -12,14 +12,17 @@ class Admin {
             $this->port     = $data['port'];
         };
 
-        if ($cfg) {
-            if (isset($cfg['cfgfile'])) {
-                $this->cfgfile = $cfg['cfgfile'];
-                $cfg = json_decode(file_get_contents($this->cfgfile), true);
+        if (isset($cfg['cfgfile'])) {
+            $this->cfgfile = $cfg['cfgfile'];
+            $cfg = json_decode(file_get_contents($this->cfgfile), true);
+            try {
+                if (!$cfg) {
+                    throw new \Exception("Error Processing cjdns configuration "
+                                        . "($this->cfgfile) Exception @ ", 1);
+                }
+            } catch (\Exception $e) {
+                echo $e->getMessage();
             }
-        } else {
-            /* TODO: import connection details from ../../cjdroute.conf */
-            throw new \Exception("Error Processing Cjdns\Admin\Socket Request", 1);
         }
 
         $setparams($cfg);

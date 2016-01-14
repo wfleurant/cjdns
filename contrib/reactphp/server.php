@@ -26,8 +26,7 @@ $cfg = new Admin([
 ]);
 
 /* Authorization to cjdns-admin can also be retreived from json file */
-$cfg = new Admin(['cfgfile' => '/home/igel/.cjdnsadmin']);
-
+$cfg = new Admin(['cfgfile' => $_SERVER['HOME'] . '/.cjdnsadmin']);
 /*******************************************************************/
 
 $app = new Phluid\App([ 'default_layout' => 'layout' ]);
@@ -63,7 +62,7 @@ $app->get('/', function($req, $res) use ($cfg) {
 
     $obj = new stdclass();
     $obj->Toolshed = new Toolshed;
-    $res->render('home', [ 'obj' => $obj ]);
+    $res->render('layout', [ 'obj' => $obj ]);
 
 });
 
