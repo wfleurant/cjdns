@@ -63,8 +63,8 @@ class SQLite {
         $date = $date->format(\DateTime::ISO8601);
 
         if ($table == 'nodes') {
-            $peerstats_data  = ($data['peers']) ? : [];
-            $peerstats_total = ($data['total']) ? : 0;
+            // $peerstats_data  = ($data['peers']) ? : [];
+            // $peerstats_total = ($data['total']) ? : 0;
             return json_encode([$table, $columns, $data ]);
 
             /************************************************/

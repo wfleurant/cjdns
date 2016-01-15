@@ -133,10 +133,21 @@ $app->get('/nodes', function ($request, $response) use ($cfg, $database) {
     $response->writeHead(200, array('Content-Type' => 'text/plain'));
     /******/
 
-    $data = Api::InterfaceController_peerStats();
+    $more = true; $page=0;
     $Socket = new Socket($cfg);
-    $Socket->authput($data);
-    $respdata = Api::decode($Socket->message);
+
+    while ($more) {
+
+        $data = Api::InterfaceController_peerStats(null, $page);
+        $Socket->authput($data);
+        $respdata[$page] = Api::decode($Socket->message);
+        if (isset(Api::decode($Socket->message)['more'])) {
+            $Socket->verbose = false;
+            $page++;
+        } else {
+            $more = null;
+        }
+    }
 
     $columns = $database->sqlite_column_fetch($database, 'peerstats');
     $database->write('nodes', $columns, $respdata);
@@ -148,40 +159,48 @@ $app->get('/nodes', function ($request, $response) use ($cfg, $database) {
         if ($method == 'nodes') {
             /* This method returns a parsed-for-humans view for a front-end */
 
-            $rdata = [];
+            for ($i=0; $i <= $page; $i++) {
 
-            foreach ($respdata['peers'] as $idx => $value) {
+                if (!isset($respdata[$i]['peers'])) { continue; }
 
-                // Connectivity
-                $rdata[$idx]['state'] = $value['state'];
+                $peers = $respdata[$i]['peers'];
 
-                // cjdns Address
-                $rdata[$idx]['ipv6'] = Toolshed::parse_peerstats($value['addr'])['ipv6'];
+                foreach ($peers as $idx => $value) {
 
-                // Total RX
-                $rdata[$idx]['bytesIn'] = \ByteUnits\bytes($value['bytesIn'])->format(null, '&nbsp;');
+                    $nodes[] = [
 
-                // Total TX
-                $rdata[$idx]['bytesOut'] = \ByteUnits\bytes($value['bytesOut'])->format(null, '&nbsp;');
+                        // Connectivity
+                        'state' => $value['state'],
 
-                // RX Speed
-                $rdata[$idx]['recvKbps'] = number_format($value['recvKbps']/1000, 3) . ' mbps';
+                        // cjdns Address
+                        'ipv6' => Toolshed::parse_peerstats($value['addr'])['ipv6'],
 
-                // TX Speed
-                $rdata[$idx]['sendKbps'] = number_format($value['sendKbps']/1000, 3) . ' mbps';
+                        // Total RX
+                        'bytesIn' => \ByteUnits\bytes($value['bytesIn'])->format(null, '&nbsp;'),
 
-                // Last Pkt
-                $rdata[$idx]['last'] = Carbon\Carbon::now('UTC')->diffForHumans(
-                                        Carbon\Carbon::createFromTimeStampUTC(
-                                          round($value['last'] / 1000)), TRUE);
+                        // Total TX
+                        'bytesOut' => \ByteUnits\bytes($value['bytesOut'])->format(null, '&nbsp;'),
 
-                // Public Key
-                $rdata[$idx]['publicKey'] = $value['publicKey'];
+                        // RX Speed
+                        'recvKbps' => number_format($value['recvKbps']/1000, 3) . ' mbps',
 
+                        // TX Speed
+                        'sendKbps' => number_format($value['sendKbps']/1000, 3) . ' mbps',
+
+                        // Last Pkt
+                        'last' => Carbon\Carbon::now('UTC')->diffForHumans(
+                                                Carbon\Carbon::createFromTimeStampUTC(
+                                                  round($value['last'] / 1000)), TRUE),
+
+                        // Public Key
+                        'publicKey' => $value['publicKey']
+
+                    ];
+
+                }
             }
 
-            $response->end(json_encode([ 'peers' => $rdata ]));
-
+            $response->end(json_encode([ 'peers' => $nodes ]));
 
         } else if ($method == 'chodes') {
             /* do blah */
