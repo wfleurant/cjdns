@@ -1,5 +1,50 @@
 <?php
 
+/********************************************/
+/* Display hinting reminder this application
+ * depends on external external  networks to
+ * update it's dependencies  and  additional
+ * cjdns build-time languages such as nodejs
+/********************************************/
+
+try {
+
+    $libmgmt = [
+        'vendor/autoload.php' => [
+            'hint' => "Note: PHP Dependency Manager: "
+                      ."//getcomposer.org/download/"
+        ],
+
+        '../../publictoip6'   => [
+            'hint' => "Compile with: ../../cjdns/do"
+        ],
+
+        'server.php'           => [
+            'hint' => "Execute within: ". $_SERVER['HOME']
+                      ."/cjdns/contrib/reactphp"
+        ],
+
+    ];
+
+    $notready = function ($v=false) use ($libmgmt) {
+        foreach ($libmgmt as $file => $r) {
+            if (!realpath(getcwd() . '/' . $file)) {
+                return $file;
+            }
+        }
+    };
+
+    if ($notready()) {
+        echo $libmgmt[$notready()]['hint'] . PHP_EOL;
+        throw new \Exception('Missing: ' . $notready(), 1);
+    }
+
+} catch (\Exception $e) {
+    trigger_error($e->getMessage());exit;
+}
+
+/********************************************/
+
 require 'vendor/autoload.php';
 
 use Cjdns\Admin\Socket;
@@ -7,8 +52,6 @@ use Cjdns\Api\Api;
 use Cjdns\Config\Admin;
 use Cjdns\Toolshed\Toolshed;
 use Cjdns\Toolshed\SQLite;
-
-/*******************************************************************/
 
 /* HTTP Server */
 $addr = 'fc5d:ac93:74a5:7217:bb2b:6091:42a0:218';
