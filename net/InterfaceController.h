@@ -164,6 +164,16 @@ int InterfaceController_beaconState(struct InterfaceController* ifc,
                                     int newState);
 
 /**
+ * CryptoAuth_reset() a peer to reestablish the connection.
+ *
+ * @param ic the if controller
+ * @param herPublicKey the public key of the foreign node or NULL for all peers
+ * @return void
+ */
+void InterfaceController_resetPeering(struct InterfaceController* ifController,
+                                      uint8_t herPublicKey[32]);
+
+/**
  * Disconnect a previously registered peer.
  *
  * @param ic the if controller

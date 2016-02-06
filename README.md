@@ -2,6 +2,7 @@
 
 [Русская версия](README_RU.md)
 [Hrvatski](README_HR.md)
+[Svenska](README_SV.md)
 
 #### *Networking Reinvented*
 
@@ -104,7 +105,7 @@ Select version gcc-4.8.1p2 or more recent.
 
 #### FreeBSD:
 
-Everything you need is available prebuild in FreeBSD' ports. 
+Everything you need is available prebuild in FreeBSD' ports.
 
     pkg install gmake node
 
@@ -154,12 +155,14 @@ need. If you're on OS X, don't worry about this step.
 
     ./cjdroute --genconf >> cjdroute.conf
 
-**Protect your conf file!** A lost conf file means you lost your password and
+**Protect your conf file!**
+
+A lost conf file means you lost your password and
 connections and anyone who connected to you will no longer be able to connect.
 A compromised conf file means that other people can impersonate you on the
 network.
 
-To set generate a conf file with permissions set so that only your user can
+To generate a conf file with permissions set so that only your user can
 read it and write to it:
 
     (umask 077 && ./cjdroute --genconf > cjdroute.conf)
@@ -268,9 +271,6 @@ A conf file with multiple friend-nodes, setup INbound, should look like:
 
     // Marilyn Patel (IPv4: 5.1.2.3; IPv6 fcbb:5bac:66e4:713:cb00:e446:c317:fc39)
     {"password": "thisisauniquestring_003", "user": "Marilyn Patel"}
-
-    // More passwords should look like this.
-    // {"password": "thisisauniquestring_004"}
     ...
 
     /*
@@ -295,12 +295,9 @@ You need to give William Jevons (who is making the INbound connection) the follo
     "bind": "0.0.0.0:yourportnumberishere",
     ```
 
-    Make sure UDP traffic is allowed through this port if you have a firewall configured.
-
-3. His username: `"login": "William Jevons"`
-4. His unique password that you uncommented or created: `"password": "thisisauniquestring_002"`
-5. Your public key: `"publicKey": "thisisauniquekey_001.k"`
-6. Your node's name: `"peerName": "your.nodes.name.goes.here"`
+3. Their unique password that you uncommented or created: `"password": "thisisauniquestring_002"`
+4. Your public key: `"publicKey": "thisisauniqueKEY_001.k"`
+5. His username: "William Jevons"
 
 His login credentials will look something like this (with your IPv4 and port):
 
@@ -346,7 +343,9 @@ To stop cjdns:
 If you are having problems use `killall cjdroute` to return to sanity. Use
 `pgrep cjdroute` or `top` to see if it running.
 
-**Note:** this starts cjdns as the root user so it can configure your system
+**NOTE!**
+
+This starts cjdns as the root user so it can configure your system
 without concern for permissions. To start cjdns as a non-root user, see
 [doc/non-root-user.md](doc/non-root-user.md).
 
@@ -361,9 +360,9 @@ stay on [IRC](#community) so that people can reach you.
 
 ## Admin interface
 
-When cjdnroute is up and running, the admin interface will be available at
+When cjdroute is up and running, the admin interface will be available at
 `udp://localhost:11234` (this can be changed in the `cjdroute.conf`
-configuration file). See [admin/README.md](admin/README.md) for more
+configuration file). See [doc/admin-api.md](doc/admin-api.md) for more
 information about the admin interface. There are several tools in `contrib/`
 that can interact with it.
 
