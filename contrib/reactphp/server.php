@@ -19,6 +19,10 @@ try {
             'hint' => "Compile with: ../../cjdns/do"
         ],
 
+        '../../cjdroute'   => [
+            'hint' => "Compile with: ../../cjdns/do"
+        ],
+
         'server.php'           => [
             'hint' => "Execute within: ". $_SERVER['HOME']
                       ."/cjdns/contrib/reactphp"
@@ -53,23 +57,23 @@ use Cjdns\Config\Admin;
 use Cjdns\Toolshed\Toolshed;
 use Cjdns\Toolshed\SQLite;
 
-/* HTTP Server */
-$addr = 'fc5d:ac93:74a5:7217:bb2b:6091:42a0:218';
-$port = 1337;
-
-// /* Database */
-
+/* Database */
 $database = new SQLite;
 
-/* Authorization to cjdns-admin can be set in-file */
+/* Authorization to Admin-API can be set in-script */
 $cfg = new Admin([
-    'addr' => '127.0.0.1',
+    'addr'     => '127.0.0.1',
+    'port'     => 11234,
     'password' => 'YRZNhY4QCgUUFDnwQXGxoyuh9aaXvrNW6Tyl78JG',
-    'port' => 11234,
 ]);
 
-/* Authorization to cjdns-admin can also be retreived from json file */
-$cfg = new Admin(['cfgfile' => $_SERVER['HOME'] . '/.cjdnsadmin']);
+/* Authorization by default is set via ../../cjdroute.conf */
+$cfg = new Admin(['cfgfile' => '../../cjdroute.conf']);
+
+/* HTTP Server Address */
+$addr = $cfg->addr;
+$port = $cfg->port;
+
 /*******************************************************************/
 
 $app = new Phluid\App([ 'default_layout' => 'layout' ]);
