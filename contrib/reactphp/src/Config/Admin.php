@@ -4,7 +4,7 @@ use Cjdns\Admin\Socket;
 
 class Admin {
 
-	public function __construct($cfg=false) {
+    public function __construct($cfg=false) {
 
         /* Sets the few $required fields */
         $setupadmin = function($req=false) {
@@ -13,9 +13,10 @@ class Admin {
                     throw new \Exception("Error no Admin-API fields were given "
                                          . "Exception @ Admin.php\n", 1);
                 } else {
-                    $this->addr     = $req['addr'];
-                    $this->password = $req['password'];
-                    $this->port     = $req['port'];
+                    $this->addr      = $req['addr'];
+                    $this->password  = $req['password'];
+                    $this->port      = $req['port'];
+                    $this->publicKey = $req['publicKey'];
                 }
             } catch (\Exception $e) {
                 echo $e->getMessage();
@@ -50,6 +51,10 @@ class Admin {
 
                 'password' => (isset($cfg->admin->password))
                                 ? $cfg->admin->password
+                                : false,
+
+                'publicKey' => (isset($cfg->publicKey))
+                                ? $cfg->publicKey
                                 : false
             ];
 

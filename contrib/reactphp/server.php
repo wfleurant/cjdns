@@ -62,17 +62,18 @@ $database = new SQLite;
 
 /* Authorization to Admin-API can be set in-script */
 $cfg = new Admin([
-    'addr'     => '127.0.0.1',
-    'port'     => 11234,
-    'password' => 'YRZNhY4QCgUUFDnwQXGxoyuh9aaXvrNW6Tyl78JG',
+    'addr'      => '127.0.0.1',
+    'port'      => 11234,
+    'password'  => 'YRZNhY4QCgUUFDnwQXGxoyuh9aaXvrNW6Tyl78JG',
+    'publicKey' => 'rzvr2764sfb3lg8d9sd1d6c8jh656jky35cy86xnq52f7xqxftq0.k',
 ]);
 
 /* Authorization by default is set via ../../cjdroute.conf */
 $cfg = new Admin(['cfgfile' => '../../cjdroute.conf']);
 
 /* HTTP Server Address */
-$addr = $cfg->addr;
-$port = $cfg->port;
+$addr = Toolshed::publictoip6($cfg->publicKey);
+$port = 1337;
 
 /*******************************************************************/
 
