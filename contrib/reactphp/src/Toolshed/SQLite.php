@@ -101,6 +101,10 @@ class SQLite {
         }
     }
 
+    static function peerstats_count($database, $date = false, $pubkey=false) {
+        return $database->database->query('select count(*) from peerstats')->fetchAll();
+    }
+
     static function report($database, $date = false, $pubkey=false) {
 
         $from   = $date['from'];
