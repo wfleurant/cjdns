@@ -24,8 +24,6 @@ class Socket {
 
     public function authput($method) {
 
-        $this->verbose = false;
-
         /* Step 1: Request a cookie from the server. */
 
         $txid = Api::decode($method)['txid'];
@@ -56,7 +54,6 @@ class Socket {
 
         /* end of authentication */
 
-        $this->verbose = true;
         $this->put($prequest);
 
         $output = function($s) {

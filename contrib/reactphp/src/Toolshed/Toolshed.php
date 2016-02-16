@@ -16,6 +16,30 @@ class Toolshed {
         return '[ᴄᴊᴅɴꜱ] ';
     }
 
+    static function ramusage($cfg, $verbose=true) {
+
+        /* $kmem(int) returns formated bytes */
+        $kmem = function($b) { return number_format($b / 1024). 'KiB'; };
+
+        /* Bytes in use for server.php */
+        $bytesphp = $kmem(memory_get_usage(true));
+
+        /* Get cjdns bytes from Admin Socket */
+        $data = \Cjdns\Api\Api::Allocator_bytesAllocated();
+        $Socket = new \Cjdns\Admin\Socket($cfg);
+        $Socket->verbose = false;
+        $Socket->authput($data);
+
+        /* Bytes in use for cjdns */
+        $bytesalloc = $kmem(\Cjdns\Api\Api::decode($Socket->message)['bytes']);
+
+        if ($verbose) {
+            echo Toolshed::logger("Memory ReactPHP: " . $bytesphp . ", cjdns: " . $bytesalloc);
+        } else {
+            return [ 'server' => $bytesphp, 'cjdns' => $bytesalloc ];
+        }
+    }
+
     /* */
     static function publictoip6($pubkey = false) {
         if (!$pubkey) { return false; }

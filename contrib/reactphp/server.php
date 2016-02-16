@@ -1005,5 +1005,37 @@ $app->get('/UDPInterface_new', function ($request, $response) use ($cfg) {
     return $response->end(json_encode(Api::decode($Socket->message)));
 });
 
-echo Toolshed::logger('ReactPHP Admin started http://['.$addr.']:'.$port);
+$app->createServer();
+
+$app->loop->addPeriodicTimer($databasetimer = 1, function () use ($cfg, $database) {
+
+    $more = true; $page=0;
+    $Socket = new Socket($cfg);
+    $Socket->verbose = false;
+
+    while ($more) {
+
+        $data = Api::InterfaceController_peerStats(null, $page);
+        $Socket->authput($data);
+        $respdata[$page] = Api::decode($Socket->message);
+        if (isset(Api::decode($Socket->message)['more'])) {
+            $Socket->verbose = false;
+            $page++;
+        } else {
+            $more = null;
+        }
+    }
+
+    Toolshed::ramusage($cfg);
+    Toolshed::logger('Peers: ' . $respdata[0]['total'] );
+
+    $columns = $database->sqlite_column_fetch($database, 'peerstats');
+
+    /* Write out peerstats table */
+    $database->write('nodes', $columns, $respdata);
+
+});
+
+Toolshed::logger('Phluid HTTP server available via cjdns @ http://['.$addr.']:'.$port);
+
 $app->listen($port, $addr);
