@@ -100,7 +100,7 @@ class Admin {
 
             try {
 
-                foreach (['addr', 'password', 'port'] as $req) {
+                foreach (['addr', 'password', 'port', 'publicKey'] as $req) {
 
                     if (!isset($cfg[$req])) {
                         throw new \Exception(
