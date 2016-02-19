@@ -501,13 +501,6 @@ $app->get('/NodeStore_dumpTable', function ($request, $response) use ($cfg) {
 
 });
 
-$app->get('/ETHInterface_listDevices', function ($request, $response) use ($cfg) {
-    /* BUG: Attempted banned syscall number [2] see doc/Seccomp.md for more information */
-    echo Toolshed::logger('Incoming: /ETHInterface_listDevices');
-    $response->writeHead(200, array('Content-Type' => 'text/plain'));
-    return $response->end(['bug'=> 'Should throw exception: lost session']);
-});
-
 $app->get('/IpTunnel_listConnections', function ($request, $response) use ($cfg) {
 
     echo Toolshed::logger('Incoming: /IpTunnel_listConnections');
@@ -546,37 +539,6 @@ $app->get('/ping', function ($request, $response) use ($cfg) {
     echo PHP_EOL;
     return $response->end(json_encode(Api::decode($Socket->message)));
 });
-
-$app->get('/Security_checkPermissions', function ($request, $response) use ($cfg) {
-    /* BUG: Attempted banned syscall number [2] see doc/Seccomp.md for more information */
-    echo Toolshed::logger('Incoming: /Security_checkPermissions');
-    return $response->end(['bug'=> 'Should throw exception: lost session']);
-});
-
-$app->get('/Security_nofiles', function ($request, $response) use ($cfg) {
-    /* BUG: Attempted banned syscall number [2] see doc/Seccomp.md for more information */
-    echo Toolshed::logger('Incoming: /Security_nofiles');
-    return $response->end(['bug'=> 'Should throw exception: lost session']);
-});
-
-$app->get('/Security_noforks', function ($request, $response) use ($cfg) {
-    /* BUG: Attempted banned syscall number [2] see doc/Seccomp.md for more information */
-    echo Toolshed::logger('Incoming: /Security_noforks');
-    return $response->end(['bug'=> 'Should throw exception: lost session']);
-});
-
-$app->get('/Security_seccomp', function ($request, $response) use ($cfg) {
-    /* BUG: Attempted banned syscall number [2] see doc/Seccomp.md for more information */
-    echo Toolshed::logger('Incoming: /Security_seccomp');
-    return $response->end(['bug'=> 'Should throw exception: lost session']);
-});
-
-$app->get('/Security_setupComplete', function ($request, $response) use ($cfg) {
-    /* BUG: Attempted banned syscall number [2] see doc/Seccomp.md for more information */
-    echo Toolshed::logger('Incoming: /Security_setupComplete');
-    return $response->end(['bug'=> 'Should throw exception: lost session']);
-});
-
 
 /*********************/
 /* with parameters() */
@@ -664,21 +626,6 @@ $app->get('/AuthorizedPasswords_remove', function ($request, $response) use ($cf
     $response->writeHead(200, array('Content-Type' => 'text/plain'));
 
     $data = Api::AuthorizedPasswords_remove();
-    $Socket = new Socket($cfg);
-    $Socket->authput($data);
-
-    echo PHP_EOL;
-    return $response->end(json_encode(Api::decode($Socket->message)));
-});
-
-$app->get('/Core_initTunnel', function ($request, $response) use ($cfg) {
-    /* BUG: Attempted banned syscall number [2] see doc/Seccomp.md for more information */
-    /* Parameters Core_initTunnel(desiredTunName=0) */
-    echo Toolshed::logger('Incoming: /Core_initTunnel');
-    $response->writeHead(200, array('Content-Type' => 'text/plain'));
-    return $response->end(json_encode(['bug'=> '']));
-
-    $data = Api::Core_initTunnel();
     $Socket = new Socket($cfg);
     $Socket->authput($data);
 
@@ -1043,22 +990,6 @@ $app->get('/UDPInterface_beginConnection', function ($request, $response) use ($
     $response->writeHead(200, array('Content-Type' => 'text/plain'));
 
     $data = Api::UDPInterface_beginConnection();
-    $Socket = new Socket($cfg);
-    $Socket->authput($data);
-
-    echo PHP_EOL;
-    return $response->end(json_encode(Api::decode($Socket->message)));
-});
-
-$app->get('/UDPInterface_new', function ($request, $response) use ($cfg) {
-    /* BUG: Attempted banned syscall number [2] see doc/Seccomp.md for more information */
-    /* Parameters UDPInterface_new(bindAddress=0) */
-
-    echo Toolshed::logger('Incoming: /UDPInterface_new');
-    $response->writeHead(200, array('Content-Type' => 'text/plain'));
-    return $response->end(json_encode(['bug'=>'']));
-
-    $data = Api::UDPInterface_new();
     $Socket = new Socket($cfg);
     $Socket->authput($data);
 
