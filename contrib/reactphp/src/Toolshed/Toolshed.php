@@ -16,7 +16,21 @@ class Toolshed {
         return '[ᴄᴊᴅɴꜱ] ';
     }
 
-    static function ramusage($cfg, $verbose=true) {
+    static function logger_http($mesg=null, $req=null) {
+        if (!$mesg) {
+            return;
+        } else if (!$req) {
+            echo Toolshed::phlogo() . $mesg . PHP_EOL;
+        }
+
+
+    }
+
+    static function phlogo() {
+        return '[ᴩʜʟᴜɪᴅ-ʜᴛᴛᴩ] ';
+    }
+
+    static function ramusage($cfg, $verbose=false) {
 
         /* $kmem(int) returns formated bytes */
         $kmem = function($b) { return number_format($b / 1024). 'KiB'; };
@@ -34,9 +48,9 @@ class Toolshed {
         $bytesalloc = $kmem(\Cjdns\Api\Api::decode($Socket->message)['bytes']);
 
         if ($verbose) {
-            echo Toolshed::logger("Memory ReactPHP: " . $bytesphp . ", cjdns: " . $bytesalloc);
+            Toolshed::logger("Memory ReactPHP: " . $bytesphp . ", cjdns: " . $bytesalloc);
         } else {
-            return [ 'server' => $bytesphp, 'cjdns' => $bytesalloc ];
+            return "Memory ReactPHP: " . $bytesphp . ", cjdns: " . $bytesalloc;
         }
     }
 

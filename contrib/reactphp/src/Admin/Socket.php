@@ -14,7 +14,7 @@ class Socket {
     protected $server;
 
     public $authentication = true;
-    public $verbose = true;
+    public $verbose = false;
 
     function __construct(Admin $cfg) {
         $this->server = $cfg->addr . ':' . $cfg->port;

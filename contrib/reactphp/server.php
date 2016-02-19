@@ -83,9 +83,27 @@ $app->inject(new \Phluid\Middleware\ExceptionHandler('exception'));
 
 $app->inject(new \Phluid\Middleware\RequestTimer());
 
-$app->inject(function($request, $response, $next) {
-    $response->once('end', function() use ($request, $response) {
-        echo "$request $response in $request->duration ms" . PHP_EOL . PHP_EOL;
+$app->inject(function($request, $response, $next) use ($app) {
+    $response->once('end', function() use ($request, $response, $app) {
+        // https://github.com/reactphp/react/pull/228/files
+        // var_dump($request->request->remoteAddress);
+
+        Toolshed::logger_http("\t".
+            "Log\t\t"  . $request.' ('.$response . ")\n\t\t".
+            "Time\t\t" . $request->duration . " ms" . "\n\t\t".
+            "Path\t\t" . $request->getPath() . "\n\t\t"
+        );
+
+        /* save to db (?)
+            $array = [
+                'host' => $request->getHost(),
+                'log'  => [ 'request' => $request, 'response' => $response ],
+                'time' => $request->duration
+            ];
+
+            Toolshed::logger_http_save($array);
+        */
+
     });
     $next();
 });
@@ -96,6 +114,37 @@ $app->inject(function($req, $res, $next) {
 });
 
 /*******************************************************************/
+$app->createServer();
+
+$app->loop->addPeriodicTimer($databasetimer = 1, function () use ($cfg, $database) {
+
+    $more = true; $page=0;
+    $Socket = new Socket($cfg);
+    $Socket->verbose = false;
+
+    while ($more) {
+
+        $data = Api::InterfaceController_peerStats(null, $page);
+        $Socket->authput($data);
+        $respdata[$page] = Api::decode($Socket->message);
+        if (isset(Api::decode($Socket->message)['more'])) {
+            $Socket->verbose = false;
+            $page++;
+        } else {
+            $more = null;
+        }
+    }
+
+    $alloc = Toolshed::ramusage($cfg);
+    $peers = ', Peers: ' . $respdata[0]['total'];
+    Toolshed::logger($alloc . ' ' . $peers);
+
+    $columns = $database->sqlite_column_fetch($database, 'peerstats');
+
+    /* Write out peerstats table */
+    $database->write('nodes', $columns, $respdata);
+
+});
 
 /* for middleware files in ./views/public/
     $app->inject(new \Phluid\Middleware\StaticFiles(__DIR__ . '/public'));
@@ -106,6 +155,8 @@ $app->inject(new \Phluid\Middleware\StaticFiles(__DIR__ . '/views/js'));
 $app->inject(new \Phluid\Middleware\StaticFiles(__DIR__ . '/views/css'));
 $app->inject(new \Phluid\Middleware\StaticFiles(__DIR__ . '/views/img'));
 
+/*******************************************************************/
+
 $app->get('/', function($req, $res) use ($cfg) {
 
     $obj = new stdclass();
@@ -115,7 +166,7 @@ $app->get('/', function($req, $res) use ($cfg) {
 });
 
 $app->get('/exit', function ($request, $response) use ($cfg) {
-    echo Toolshed::logger('Incoming: /exit');
+    Toolshed::logger_http('Incoming: /exit', $request);
     exit();
 });
 
@@ -129,6 +180,7 @@ $app->get('/report', function ($request, $response, $pubkey) use ($cfg, $databas
 
 });
 
+/*******************************************************************/
 $app->get('/report/:pubkey', function ($request, $response, $pubkey) use ($cfg, $database) {
 
     /* public key of node */
@@ -197,12 +249,9 @@ $app->get('/nodes', function ($request, $response) use ($cfg, $database) {
         }
     }
 
-    $columns = $database->sqlite_column_fetch($database, 'peerstats');
-    $database->write('nodes', $columns, $respdata);
-
     if ($method) {
 
-        echo Toolshed::logger('Incoming: /nodes with method: ' . $method);
+        echo Toolshed::logger('Incoming: /nodes');
 
         if ($method == 'nodes') {
             /* This method returns a parsed-for-humans view for a front-end */
@@ -241,7 +290,11 @@ $app->get('/nodes', function ($request, $response) use ($cfg, $database) {
                                                   round($value['last'] / 1000)), TRUE),
 
                         // Public Key
-                        'publicKey' => $value['publicKey']
+                        'publicKey' => $value['publicKey'],
+
+                        // User
+                        'user' => $value['user']
+
 
                     ];
 
@@ -255,7 +308,7 @@ $app->get('/nodes', function ($request, $response) use ($cfg, $database) {
             $response->end(json_encode($respdata));
 
         } else {
-            echo Toolshed::logger('Incoming: /nodes but an unknown method');
+            echo Toolshed::logger('Incoming: /nodes');
             $response->end(json_encode([[ 'response' => 'Unknown Method' ]]));
         }
 
@@ -274,7 +327,9 @@ $app->get('/nodes', function ($request, $response) use ($cfg, $database) {
     return;
 });
 
+/*******************************************************************/
 /* Available Functions */
+/*******************************************************************/
 $app->get('/help', function ($request, $response) use ($cfg) {
 
     echo Toolshed::logger('Incoming: /help');
@@ -301,7 +356,9 @@ $app->get('/help', function ($request, $response) use ($cfg) {
     return $response->end(Toolshed::cleanresp($result, $flatten=true, $droptxrx=true));
 });
 
+/*******************************************************************/
 /* Authenticated Ping */
+/*******************************************************************/
 $app->get('/authping', function ($request, $response) use ($cfg) {
 
     echo Toolshed::logger('Incoming: /authping');
@@ -315,7 +372,9 @@ $app->get('/authping', function ($request, $response) use ($cfg) {
     return $response->end(json_encode(Api::decode($Socket->message)));
 });
 
+/*******************************************************************/
 /* Un-Authenticated Ping */
+/*******************************************************************/
 $app->get('/ping', function ($request, $response) use ($cfg) {
 
     echo Toolshed::logger('Incoming: /ping');
@@ -328,6 +387,8 @@ $app->get('/ping', function ($request, $response) use ($cfg) {
     echo PHP_EOL;
     return $response->end(json_encode(Api::decode($Socket->message)));
 });
+
+/*******************************************************************/
 
 /*******************/
 /* no parameters() */
@@ -1003,37 +1064,6 @@ $app->get('/UDPInterface_new', function ($request, $response) use ($cfg) {
 
     echo PHP_EOL;
     return $response->end(json_encode(Api::decode($Socket->message)));
-});
-
-$app->createServer();
-
-$app->loop->addPeriodicTimer($databasetimer = 1, function () use ($cfg, $database) {
-
-    $more = true; $page=0;
-    $Socket = new Socket($cfg);
-    $Socket->verbose = false;
-
-    while ($more) {
-
-        $data = Api::InterfaceController_peerStats(null, $page);
-        $Socket->authput($data);
-        $respdata[$page] = Api::decode($Socket->message);
-        if (isset(Api::decode($Socket->message)['more'])) {
-            $Socket->verbose = false;
-            $page++;
-        } else {
-            $more = null;
-        }
-    }
-
-    Toolshed::ramusage($cfg);
-    Toolshed::logger('Peers: ' . $respdata[0]['total'] );
-
-    $columns = $database->sqlite_column_fetch($database, 'peerstats');
-
-    /* Write out peerstats table */
-    $database->write('nodes', $columns, $respdata);
-
 });
 
 Toolshed::logger('Phluid HTTP server available via cjdns @ http://['.$addr.']:'.$port);

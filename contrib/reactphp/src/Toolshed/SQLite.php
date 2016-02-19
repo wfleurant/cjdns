@@ -4,6 +4,8 @@
             if/when issue or latency occurs on the host or database.
 */
 
+date_default_timezone_set('UTC');
+
 class SQLite {
 
     public function __construct($data=false) {
