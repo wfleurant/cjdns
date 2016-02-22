@@ -109,10 +109,11 @@ class SQLite {
         return $database->database->query('select count(*) from peerstats')->fetchAll();
     }
 
-    static function report($database, $date = false, $pubkey=false) {
+    static function report($database, $param = false, $pubkey=false) {
 
-        $from   = $date['from'];
-        $until  = $date['until'];
+        $from   = $param['from'];
+        $until  = $param['until'];
+        $method = $param['method'];
 
         $var = $database->database->select("peerstats",
             [
@@ -130,11 +131,25 @@ class SQLite {
                     "publicKey" => $pubkey,
                     "date[<>]"  => [ $from, $until ]
                 ],
-                "LIMIT" => [ 0, 10 ],
+                // "LIMIT" => [ 0, 10 ],
             ]);
 
         /*$database->database->log();*/
-        return $var;
+
+        if ($method == 'summary') {
+
+            $resp['total'] = count($var);
+
+            $resp['thismonth'] = $var;
+
+        } else {
+
+            $resp['total'] = count($var);
+            $resp['data'] = $var;
+
+        }
+
+        return [ $resp ];
     }
 
 }

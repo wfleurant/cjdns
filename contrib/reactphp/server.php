@@ -205,45 +205,65 @@ $app->get('/report', function ($request, $response, $pubkey) use ($cfg, $databas
 /*******************************************************************/
 $app->get('/report/:pubkey', function ($request, $response, $pubkey) use ($cfg, $database) {
 
-    /* public key of node */
-    $pubkey = $request->param('pubkey');
     $response->writeHead(200, array('Content-Type' => 'text/plain'));
 
-    $method = $request->param('date');
+    /* public key of node */
+    $pubkey = $request->param('pubkey');
 
+    $method = $request->param('method');
+    $from   = $request->param('from');
+    $until  = $request->param('until');
+
+    echo Toolshed::logger('Incoming: /report ('.$pubkey.') '. $method);
+
+    /* work in progress */
     if (!$method) {
-        $phrase = 'first day of this month';
-    } else {
-        /* choose default or print available report dates */
+
+        $method = 'summary'; /* .. undefined ..*/
+
+        if (!isset($from))  {  /* .. default .. */
+            $from =  \Carbon\Carbon::today('UTC')->toIso8601String();
+
+        } else {
+            $from = new \Carbon\Carbon($from);
+            $from = $from->modify()->toIso8601String();
+        }
+
+        if (!isset($until)) { /* .. default .. */
+            $until = \Carbon\Carbon::now('UTC')->toIso8601String();
+        } else {
+            $until = new \Carbon\Carbon($until);
+            $from = $from->modify()->toIso8601String();
+        }
+
+    } elseif ($method == 'summary') {
+        // $from  = 'first day of this month';
+        $from =  \Carbon\Carbon::now('UTC'); // ->toIso8601String();;
+        $from  =  $from->modify('first day of this month')->toIso8601String();
+        $until =  \Carbon\Carbon::now('UTC')->toIso8601String();
+
+    } elseif ($method == 'phrase') {
+
+        // $from  = 'first day of this month';
+        $from  =  $from->modify()->toIso8601String();
+        $until = $until->modify()->toIso8601String();
+
     }
 
-    /* use between dates, or a phrase */
-
-    $phrase = 'first day of this month';
-
-    $from = \Carbon\Carbon::today('UTC');
-    $from = $from->modify($phrase)->toIso8601String();
-
-    $until = \Carbon\Carbon::yesterday('UTC')->toIso8601String();
+    /* work in progress.... */
 
     $date = [
         'from'   => $from,
         'until'  => $until,
-        'phrase' => $phrase
+        'method' => $method
     ];
 
-    /************/
-    if ($pubkey) {
-        $var = SQLite::report($database, $date, $pubkey);
+    // print_r($date); exit;
 
-        $v = json_encode($var);
-        /* debug */
-        // $v = \Vardump::singleton()->dump($var);
+    $var = SQLite::report($database, $date, $pubkey);
+    $v = json_encode($var);
 
-        return $response->end($v);
-    } else {
-        return $response->end(json_encode(['error']));
-    }
+    return $response->end($v);
 
 });
 

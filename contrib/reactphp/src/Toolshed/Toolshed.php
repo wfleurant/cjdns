@@ -27,7 +27,7 @@ class Toolshed {
     }
 
     static function phlogo() {
-        return '[ᴩʜʟᴜɪᴅ-ʜᴛᴛᴩ] ';
+        return '[Pʜʟᴜɪᴅ-ʜᴛᴛp] ';
     }
 
     static function ramusage($cfg, $verbose=false) {
