@@ -31,6 +31,7 @@ class SQLite {
             last               integer,
             lostPackets        integer,
             publicKey          varchar(54),
+            ipv6               varchar(39),
             receivedOutOfRange tinyint,
             recvKbps           integer,
             sendKbps           integer,
@@ -65,9 +66,9 @@ class SQLite {
         $date = $date->format(\DateTime::ISO8601);
 
         if ($table == 'nodes') {
-            // $peerstats_data  = ($data['peers']) ? : [];
-            // $peerstats_total = ($data['total']) ? : 0;
-            return json_encode([$table, $columns, $data ]);
+
+            $peerstats_data  = ($data['peers']) ? : [];
+            $peerstats_total = ($data['total']) ? : 0;
 
             /************************************************/
             /* Returns an array of valid fields for sqlite */
@@ -81,22 +82,23 @@ class SQLite {
                 return $res;
             };
 
-            /* Build the array */
+            /* Build the array, and only allow fields found in the SQLite::__construct */
             for ($i=0; $i < $peerstats_total; $i++) {
-                /* date mutates to ISO8601 (2015-11-29T18:51:21-0500) */
-                $peerstats_data[$i]['date'] = $date;
+
+                $peerstats_data[$i]['date'] = $date; // ISO8601 (2015-11-29T18:51:21-0500)
+                $peerstats_data[$i]['ipv6'] = Toolshed::parse_peerstats($peerstats_data[$i]['addr'])['ipv6'];
+
                 $cherrypick_data[$i] = call_user_func($valid_fields, $peerstats_data[$i]);
             }
 
-            $id = $database->insert("peerstats", $cherrypick_data );
+            $this->database->insert("peerstats", $cherrypick_data);
 
-            /* if ($latest_peerstats_table) */
-            foreach ($id as $latest_peerstats) {
-                /* Create a table for status webpage ie //www.fc00.h/current-peers */
-                // $database->insert("peerstats_status", $cherrypick_data, "where publickey == publickey" );
+            /* if ($latest_peerstats_table)
+            foreach (['id'] as $latest_peerstats) {
+                // Create a table for status webpage ie //www.fc00.h/current-peers
+                $this->database->insert("peerstats_status", $cherrypick_data, "where publickey == publickey" );
             }
-
-            return $id;
+            */
 
         } else {
             return;

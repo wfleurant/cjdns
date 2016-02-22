@@ -94,7 +94,7 @@ $app->inject(function($request, $response, $next) use ($app) {
             "Path\t\t" . $request->getPath() . "\n\t\t"
         );
 
-        /* save to db (?)
+        /* save to db ()
             $array = [
                 'host' => $request->getHost(),
                 'log'  => [ 'request' => $request, 'response' => $response ],
@@ -122,27 +122,49 @@ $app->loop->addPeriodicTimer($databasetimer = 1, function () use ($cfg, $databas
     $Socket = new Socket($cfg);
     $Socket->verbose = false;
 
+    $respdata['peers'] = array();
+    $respdata['total'] = 0;
+
+    /* Add all the peerstats to the $respdata array */
     while ($more) {
 
         $data = Api::InterfaceController_peerStats(null, $page);
         $Socket->authput($data);
-        $respdata[$page] = Api::decode($Socket->message);
+
+        $p = Api::decode($Socket->message);
+
+        if (isset($p['peers'])) {
+            foreach ($p['peers'] as $peer) {
+                array_push($respdata['peers'], $peer);
+            }
+        } else {
+            continue;
+        }
+
+
         if (isset(Api::decode($Socket->message)['more'])) {
-            $Socket->verbose = false;
             $page++;
         } else {
+            $respdata['total'] = Api::decode($Socket->message)['total'];
             $more = null;
         }
     }
 
-    $alloc = Toolshed::ramusage($cfg);
-    $peers = ', Peers: ' . $respdata[0]['total'];
-    Toolshed::logger($alloc . ' ' . $peers);
 
     $columns = $database->sqlite_column_fetch($database, 'peerstats');
 
     /* Write out peerstats table */
     $database->write('nodes', $columns, $respdata);
+
+
+    $alloc = Toolshed::ramusage($cfg);
+    $peers = 'Peers cjdns: ' . $respdata['total'];
+
+    Toolshed::logger(
+        $alloc . ' | ' .
+        $peers . ', ' .
+        'Peers SQLite: ' . number_format($database::peerstats_count($database)[0][0])
+    );
 
 });
 
@@ -188,6 +210,7 @@ $app->get('/report/:pubkey', function ($request, $response, $pubkey) use ($cfg, 
     $response->writeHead(200, array('Content-Type' => 'text/plain'));
 
     $method = $request->param('date');
+
     if (!$method) {
         $phrase = 'first day of this month';
     } else {
