@@ -77,7 +77,7 @@ $port = 1337;
 
 /*******************************************************************/
 
-$app = new Phluid\App([ 'default_layout' => 'layout' ]);
+$app = new Phluid\App();
 
 $app->inject(new \Phluid\Middleware\ExceptionHandler('exception'));
 
@@ -192,20 +192,21 @@ $app->get('/exit', function ($request, $response) use ($cfg) {
     exit();
 });
 
-$app->get('/report', function ($request, $response, $pubkey) use ($cfg, $database) {
-
-    $response->writeHead(200, array('Content-Type' => 'text/plain'));
+$app->get('/report', function ($req, $res) use ($cfg, $database) {
 
     /* ... print available report dates (?) */
-    $v = 'Please use: /report/[publicKey] with parameters: ';
-    return $response->end($v);
+    // $v = 'Please use: /report/[publicKey] with parameters: ';
+
+    $obj = new stdclass();
+    $obj->Toolshed = new Toolshed;
+    $obj->SQLite = new SQLite;
+
+    $res->render('report', [ 'obj' => $obj ]);
 
 });
 
 /*******************************************************************/
 $app->get('/report/:pubkey', function ($request, $response, $pubkey) use ($cfg, $database) {
-
-    $response->writeHead(200, array('Content-Type' => 'text/plain'));
 
     /* public key of node */
     $pubkey = $request->param('pubkey');
@@ -258,12 +259,22 @@ $app->get('/report/:pubkey', function ($request, $response, $pubkey) use ($cfg, 
         'method' => $method
     ];
 
-    // print_r($date); exit;
-
     $var = SQLite::report($database, $date, $pubkey);
     $v = json_encode($var);
 
-    return $response->end($v);
+
+    $obj = new stdclass();
+    $obj->Toolshed = new Toolshed;
+    $obj->SQLite = new SQLite;
+
+    $obj->pubkey = $pubkey;
+    $obj->method = $method;
+    $obj->from = $from;
+    $obj->until = $until;
+
+
+    $response->render('report', [ 'obj' => $obj ]);
+
 
 });
 
