@@ -47,7 +47,7 @@ try {
     trigger_error($e->getMessage());exit;
 }
 
-/********************************************/
+/*******************************************************************/
 
 require 'vendor/autoload.php';
 
@@ -57,10 +57,14 @@ use Cjdns\Config\Admin;
 use Cjdns\Toolshed\Toolshed;
 use Cjdns\Toolshed\SQLite;
 
+/*******************************************************************/
 /* Database */
+/*******************************************************************/
 $database = new SQLite;
 
+/*******************************************************************/
 /* Authorization to Admin-API can be set in-script */
+/*******************************************************************/
 $cfg = new Admin([
     'addr'      => '127.0.0.1',
     'port'      => 11234,
@@ -68,14 +72,21 @@ $cfg = new Admin([
     'publicKey' => 'rzvr2764sfb3lg8d9sd1d6c8jh656jky35cy86xnq52f7xqxftq0.k',
 ]);
 
+/*******************************************************************/
 /* Authorization by default is set via ../../cjdroute.conf */
+/*******************************************************************/
 $cfg = new Admin(['cfgfile' => '../../cjdroute.conf']);
 
+/*******************************************************************/
 /* HTTP Server Address */
+/*******************************************************************/
 $addr = Toolshed::publictoip6($cfg->publicKey);
 $port = 1337;
 
 /*******************************************************************/
+/* Phluid */
+/*******************************************************************/
+
 
 $app = new Phluid\App();
 
@@ -113,6 +124,8 @@ $app->inject(function($req, $res, $next) {
     $next();
 });
 
+/*******************************************************************/
+/* Main */
 /*******************************************************************/
 $app->createServer();
 
@@ -178,7 +191,8 @@ $app->inject(new \Phluid\Middleware\StaticFiles(__DIR__ . '/views/css'));
 $app->inject(new \Phluid\Middleware\StaticFiles(__DIR__ . '/views/img'));
 
 /*******************************************************************/
-
+/* View: Display of Peer Stats in HTML Table */
+/*******************************************************************/
 $app->get('/', function($req, $res) use ($cfg) {
 
     $obj = new stdclass();
@@ -187,6 +201,9 @@ $app->get('/', function($req, $res) use ($cfg) {
 
 });
 
+/*******************************************************************/
+/* View: Display a Helpful Method of Reporting Historical Data */
+/*******************************************************************/
 $app->get('/report', function ($req, $res) use ($cfg, $database) {
 
     /* ... print available report dates (?) */
@@ -200,6 +217,8 @@ $app->get('/report', function ($req, $res) use ($cfg, $database) {
 
 });
 
+/*******************************************************************/
+/* View: Display Historical of a Given Public Key (Work in Prog..) */
 /*******************************************************************/
 $app->get('/report/:pubkey', function ($request, $response, $pubkey) use ($cfg, $database) {
 
@@ -274,7 +293,8 @@ $app->get('/report/:pubkey', function ($request, $response, $pubkey) use ($cfg, 
 });
 
 /*******************************************************************/
-
+/* AJAX: Return the Data Used by Default Index */
+/*******************************************************************/
 $app->get('/nodes', function ($request, $response) use ($cfg, $database) {
 
     /******/
@@ -377,7 +397,7 @@ $app->get('/nodes', function ($request, $response) use ($cfg, $database) {
 });
 
 /*******************************************************************/
-/* Available Functions */
+/* Available (cjdns) Functions */
 /*******************************************************************/
 $app->get('/help', function ($request, $response) use ($cfg) {
 
@@ -452,6 +472,7 @@ $app->get('/Allocator_bytesAllocated', function ($request, $response) use ($cfg)
     echo PHP_EOL;
     return $response->end(json_encode(Api::decode($Socket->message)));
 });
+
 /*******************************************************************/
 /* Node Store / Dump Table */
 /*******************************************************************/
