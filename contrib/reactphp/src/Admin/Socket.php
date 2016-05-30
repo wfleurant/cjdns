@@ -93,7 +93,7 @@ class Socket {
         $factory = new \React\Datagram\Factory($loop);
 
         $factory->createClient($server)
-                ->then(function (\React\Datagram\Socket $client) use ($method, $server)
+                ->then(function (\React\Datagram\Socket $client) use ($method, $server, $loop)
         {
 
             if ($this->verbose) {
@@ -102,8 +102,34 @@ class Socket {
 
             $client->send($method);
 
-            $client->on('message', function($message, $serverAddress, $client) use ($method)
+            $tid = $loop->addPeriodicTimer(2.0, function() use ($client, $method, $loop)
             {
+                echo Toolshed::logger('Socket->sendTimeout('.Toolshed::msgtrim($method).'...)');
+
+                try {
+                    if (isset($tid)) {
+                        $loop->cancelTimer($tid);
+                        $client->end();
+                    } else {
+                        throw new \Exception('Sending data to cjdns admin socket timed out.', 1);
+                    }
+                } catch (Exception $e) {
+                    echo Toolshed::logger('Socket->send('. get_class($e) .') '.
+                        'thrown within the exception handler. Message: '.
+                        $e->getMessage()." on line " . $e->getLine());
+                    $client->end();
+                }
+            });
+
+            $client->on('error', function($error, $client) {
+                echo Toolshed::logger('Socket->send('. get_class($e) .') '.
+                                      'Error: ' . $error->getMessage());
+            });
+
+            $client->on('message', function($message, $serverAddress, $client) use ($method, $client, $loop, $tid)
+            {
+
+                $loop->cancelTimer($tid);
                 try {
                     $this->message = $message;
                     if ($this->verbose) {
