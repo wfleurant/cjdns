@@ -5,10 +5,12 @@ use Cjdns\Toolshed\Toolshed;
 
 class Api {
 
-	static function txid() {
-		$txid = strtoupper(bin2hex(openssl_random_pseudo_bytes($bytes=10, $cstrong)));
-		echo Toolshed::logger('Generated TXID: ' . $txid);
-		return $txid;
+	/* cjdns api subcalls */
+
+	static function txid($txid=null) {
+		return (isset($txid))
+				? $txid
+				: strtoupper(bin2hex(openssl_random_pseudo_bytes($bytes=10, $cstrong)));
 	}
 
 	static function hash() {
@@ -23,31 +25,63 @@ class Api {
 		return Bencode::decode($message);
 	}
 
-	static function Ping($txid=null) {
-		$txid = ($txid) ? $txid : Api::txid();
-		return Bencode::encode([ 'q'=> 'ping', 'txid'=> $txid ]);
+	/* cjdns api */
+
+	static function Ping($txid=null, $page=0) {
+		$txid = Api::txid($txid);
+		return Bencode::encode([ 'q'=> 'ping',
+								 'txid'=> $txid
+							   ]);
 	}
 
-	static function APing($txid=null) {
+	static function AuthPing($txid=null, $page=0) {
 		$txid = ($txid) ? $txid : Api::txid();
-		$authreq = [ 'aq' => 'ping', 'q' => 'auth', 'txid' => $txid ];
-		return Bencode::encode($authreq);
+		return Bencode::encode([ 'aq' => 'ping',
+								 'q' => 'auth',
+								 'txid' => $txid
+							   ]);
 	}
 
-	static function Cookie($txid=null) {
+	static function Cookie($txid=null, $page=0) {
 		$txid = ($txid) ? $txid : Api::txid();
-		return Bencode::encode([ 'q'=> 'cookie', 'txid' => $txid ]);
+		return Bencode::encode([ 'q'=> 'cookie',
+			                     'txid' => $txid
+							   ]);
 	}
 
-	static function Admin_availableFunctions($txid=null) {
+	static function Admin_availableFunctions($txid=null, $page=0) {
 		$txid = ($txid) ? $txid : Api::txid();
-		return Bencode::encode([ 'q'=> 'Admin_availableFunctions', 'txid' => $txid ]);
+		return Bencode::encode([ 'q'=> 'Admin_availableFunctions',
+								 'txid' => $txid,
+								 'args' => [ 'page' => $page ]
+							   ]);
 	}
 
-	static function InterfaceController_peerStats($txid=null) {
+	static function InterfaceController_peerStats($txid=null, $page=0) {
 		$txid = ($txid) ? $txid : Api::txid();
-		return Bencode::encode([ 'q'=> 'InterfaceController_peerStats', 'txid' => $txid ]);
+		return Bencode::encode([ 'aq'=> 'InterfaceController_peerStats',
+								 'q' => 'auth',
+								 'txid' => $txid,
+								 'args' => [ 'page' => $page ]
+							   ]);
 	}
 
+	static function Allocator_bytesAllocated($txid=null, $page=0) {
+		$txid = ($txid) ? $txid : Api::txid();
+		return Bencode::encode([ 'aq' => 'Allocator_bytesAllocated',
+								 'q' => 'auth',
+								 'txid' => $txid,
+								 'args' => [ 'page' => $page ]
+							   ]);
+	}
+
+	static function NodeStore_dumpTable($txid=null, $page=0) {
+		$txid = ($txid) ? $txid : Api::txid();
+		return Bencode::encode([ 'aq' => 'NodeStore_dumpTable',
+								 'q' => 'auth',
+								 'txid' => $txid,
+								 'args' => [ 'page' => $page ]
+							   ]);
+	}
 
 }

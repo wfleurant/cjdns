@@ -21,7 +21,7 @@ If you need to use blocking calls, move them to a separate process and use inter
 
 
 
-## Cjdns 
+## Cjdns
 
 ### Server
 
@@ -44,5 +44,28 @@ $ php server.php
 
 ```
 $ curl localhost:1337/ping
-{"q":"pong","txid":"77CA034DD8E3DC037830"} 
+{"q":"pong","txid":"77CA034DD8E3DC037830"}
+```
+
+
+#### Authenticated Ping
+
+An authenticated ping query with the cjdns admin-api is triggered when an HTTP request event is trigged within server.php (ReactPHP & Phluid)
+
+
+```PHP
+
+/* Authenticated Ping */
+$app->get('/authping', function ($request, $response) use ($cfg) {
+
+    echo Toolshed::logger('Incoming: /authping');
+    $response->writeHead(200, array('Content-Type' => 'text/plain'));
+
+    $data = Api::AuthPing();
+    $Socket = new Socket($cfg);
+    $Socket->authput($data);
+
+    echo PHP_EOL;
+    return $response->end($data);
+});
 ```
