@@ -20,7 +20,7 @@
 #include "memory/Allocator.h"
 #include "util/Identity.h"
 #include "util/Linker.h"
-Linker_require("dht/dhtcore/Node.c")
+Linker_require("dht/dhtcore/Node.c");
 
 struct Node_Link;
 
@@ -135,7 +135,6 @@ static inline uint64_t Node_getCost(struct Node_Two* node)
 {
     return node->cost_pvt;
 }
-void Node_setCost(struct Node_Two* node, uint64_t newCost);
 
 static inline struct Node_Link* Node_getBestParent(struct Node_Two* node)
 {

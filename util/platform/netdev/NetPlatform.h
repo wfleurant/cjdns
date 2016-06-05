@@ -15,10 +15,12 @@
 #ifndef NetPlatform_H
 #define NetPlatform_H
 
+#include "memory/Allocator.h"
 #include "exception/Except.h"
 #include "util/log/Log.h"
+#include "util/platform/Sockaddr.h"
 #include "util/Linker.h"
-Linker_require("util/platform/netdev/NetPlatform_" + builder.config.systemName + ".c")
+Linker_require("util/platform/netdev/NetPlatform_" + builder.config.systemName + ".c");
 
 #include <stdint.h>
 
@@ -29,6 +31,7 @@ void NetPlatform_addAddress(const char* interfaceName,
                             int prefixLen,
                             int addrFam,
                             struct Log* logger,
+                            struct Allocator* tempAlloc,
                             struct Except* eh);
 
 void NetPlatform_setMTU(const char* interfaceName,
@@ -36,4 +39,10 @@ void NetPlatform_setMTU(const char* interfaceName,
                         struct Log* logger,
                         struct Except* eh);
 
+void NetPlatform_setRoutes(const char* ifName,
+                           struct Sockaddr** prefixSet,
+                           int prefixCount,
+                           struct Log* logger,
+                           struct Allocator* tempAlloc,
+                           struct Except* eh);
 #endif

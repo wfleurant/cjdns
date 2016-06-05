@@ -33,6 +33,10 @@
 #define CAP_TO_MASK(X) (1 << ((X) & 31))
 #endif
 
+#ifndef _LINUX_CAPABILITY_VERSION_3
+#define _LINUX_CAPABILITY_VERSION_3 0x20080522
+#endif
+
 #define PERMITTED_MASK CAP_TO_MASK(CAP_NET_ADMIN)
 
 static inline int capSet(cap_user_header_t hdr, cap_user_data_t data)
@@ -50,9 +54,9 @@ static inline int capGet(cap_user_header_t hdr, cap_user_data_t data)
 void Setuid_preSetuid(struct Allocator* alloc, struct Except* eh)
 {
     cap_user_header_t hdr = Allocator_calloc(alloc, sizeof(*hdr), 1);
-    cap_user_data_t data = Allocator_calloc(alloc, sizeof(*data), 1);
+    cap_user_data_t data = Allocator_calloc(alloc, sizeof(*data), 2);
 
-    hdr->version = _LINUX_CAPABILITY_VERSION;
+    hdr->version = _LINUX_CAPABILITY_VERSION_3;
     hdr->pid = 0;
     if (capGet(hdr, data)) {
         Except_throw(eh, "Error getting capabilities: [errno:%d (%s)]", errno, strerror(errno));
@@ -73,9 +77,9 @@ void Setuid_preSetuid(struct Allocator* alloc, struct Except* eh)
 void Setuid_postSetuid(struct Allocator* alloc, struct Except* eh)
 {
     cap_user_header_t hdr = Allocator_calloc(alloc, sizeof(*hdr), 1);
-    cap_user_data_t data = Allocator_calloc(alloc, sizeof(*data), 1);
+    cap_user_data_t data = Allocator_calloc(alloc, sizeof(*data), 2);
 
-    hdr->version = _LINUX_CAPABILITY_VERSION;
+    hdr->version = _LINUX_CAPABILITY_VERSION_3;
     hdr->pid = 0;
     if (capGet(hdr, data)) {
         Except_throw(eh, "Error getting capabilities (post-setuid): [errno:%d (%s)]",
