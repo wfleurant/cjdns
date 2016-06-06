@@ -7,18 +7,31 @@ require "Cjdns.php";
 define('PASSWORD', 'NONE');
 
 $cjdns = new Cjdns(PASSWORD, "127.0.0.1", 11234);
-$res = $cjdns->call("InterfaceController_peerStats", 0);
-$pattern = "| %13s | %11s | %17s | %10s | %10s | %5s | %3s | %2s |\n";
-$br="+---------------+-------------+-------------------+------------+------------+-------+-----+----+\n";
+try {
+    $res = $cjdns->call("InterfaceController_peerStats", 0);
+    if (array_key_exists('error', $res)) {
+        throw new Exception('An error occured calling InterfaceController_peerStats');
+    }
+} catch(AssertionError $e) {
+    print_r($res);
+}
+
+$pattern = "| %13s | %12s | %17s | %10s | %10s | %5s | %3s | %5s |\n";
+$br="+---------------+--------------+-------------------+------------+------------+-------+-----+-------+\n";
 printf($br);
 printf($pattern, 'Public Key ', 'State   ', 'Last       ', 'Bytes In', 'Bytes Out', 'Lost', 'Ver', 'In');
+
 printf($br);
-foreach ($res['peers'] as $a)
-{
-	$pK = $a['publicKey']; $pK = preg_replace('/^(.{4}).+?(.{6})$/', '$1...$2', $pK);
-	printf($pattern, $pK, $a['state'],
-		date('H:i:s d.m.y', $a['last']/1000),
-		$a['bytesIn'], $a['bytesOut'], $a['lostPackets'],
-		$a['version'], $a['isIncoming']);
+
+foreach ($res['peers'] as $a) {
+    $publicKey  = preg_replace('/^(.{4}).+?(.{6})$/', '$1...$2', $a['publicKey']);
+    $isIncoming = ($a['isIncoming']) ? 'True' : 'False';
+    $version    = ($a['version'] > 0) ? 'v'.$a['version'] : '-';
+    printf($pattern,
+        $publicKey, $a['state'],
+        date('H:i:s d.m.y', $a['last']/1000),
+        $a['bytesIn'], $a['bytesOut'],
+        $a['lostPackets'], $version, $isIncoming);
 }
+
 printf($br);
