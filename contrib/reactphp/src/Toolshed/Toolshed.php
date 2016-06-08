@@ -54,9 +54,13 @@ class Toolshed {
         }
     }
 
+    static function valid_pubkey($userinput) {
+        return preg_match('/^[a-z|0-9]{52}\.k$/' , $userinput);
+    }
+
     /* */
     static function publictoip6($pubkey = false) {
-        if (!$pubkey) { return false; }
+        if (!Toolshed::valid_pubkey($pubkey)) { return false; }
         $bin = '../../publictoip6 ';
         $h   = popen($bin . $pubkey, 'r');
         $ip6 = trim(fread($h, 39));
