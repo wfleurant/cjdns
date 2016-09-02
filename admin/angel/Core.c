@@ -23,7 +23,12 @@
 #include "crypto/AddressCalc.h"
 #include "crypto/random/Random.h"
 #include "crypto/random/libuv/LibuvEntropyProvider.h"
+#ifdef SUBNODE
+#include "subnode/SubnodePathfinder.h"
+#include "subnode/SupernodeHunter_admin.h"
+#else
 #include "dht/Pathfinder.h"
+#endif
 #include "exception/Jmp.h"
 #include "interface/Iface.h"
 #include "util/events/UDPAddrIface.h"
@@ -41,6 +46,7 @@
 #include "memory/MallocAllocator.h"
 #include "memory/Allocator_admin.h"
 #include "net/SwitchPinger_admin.h"
+#include "net/UpperDistributor_admin.h"
 #include "tunnel/IpTunnel_admin.h"
 #include "tunnel/RouteGen_admin.h"
 #include "util/events/EventBase.h"
@@ -232,12 +238,21 @@ void Core_init(struct Allocator* alloc,
     Iface_plumb(&nc->upper->ipTunnelIf, &ipTunnel->nodeInterface);
 
     // The link between the Pathfinder and the core needs to be asynchronous.
-    struct Pathfinder* pf = Pathfinder_register(alloc, logger, eventBase, rand, admin);
+    #ifdef SUBNODE
+        struct SubnodePathfinder* pf =
+            SubnodePathfinder_new(alloc, logger, eventBase, rand, nc->myAddress);
+    #else
+        struct Pathfinder* pf = Pathfinder_register(alloc, logger, eventBase, rand, admin);
+    #endif
     struct ASynchronizer* pfAsync = ASynchronizer_new(alloc, eventBase, logger);
     Iface_plumb(&pfAsync->ifA, &pf->eventIf);
     EventEmitter_regPathfinderIface(nc->ee, &pfAsync->ifB);
+    #ifdef SUBNODE
+        SubnodePathfinder_start(pf);
+    #endif
 
     // ------------------- Register RPC functions ----------------------- //
+    UpperDistributor_admin_register(nc->upper, admin, alloc);
     RouteGen_admin_register(rg, admin, alloc);
     InterfaceController_admin_register(nc->ifController, admin, alloc);
     SwitchPinger_admin_register(nc->sp, admin, alloc);
@@ -246,6 +261,10 @@ void Core_init(struct Allocator* alloc,
     ETHInterface_admin_register(eventBase, alloc, logger, admin, nc->ifController);
 #endif
     FileNo_admin_register(admin, alloc, eventBase, logger, eh);
+
+#ifdef SUBNODE
+    SupernodeHunter_admin_register(pf->snh, admin, alloc);
+#endif
 
     AuthorizedPasswords_init(admin, nc->ca, alloc);
     Admin_registerFunction("ping", adminPing, admin, false, NULL, admin);
