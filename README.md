@@ -13,6 +13,7 @@ near-zero-configuration networking, and prevents many of the security and
 scalability issues that plague existing networks.
 
 [![Build Status](https://travis-ci.org/cjdelisle/cjdns.svg?branch=master)](https://travis-ci.org/cjdelisle/cjdns)
+[![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/387/badge)](https://bestpractices.coreinfrastructure.org/projects/387)
 [![tip for next commit](https://tip4commit.com/projects/941.svg)](https://tip4commit.com/github/cjdelisle/cjdns)
 [![irc](https://img.shields.io/badge/irc%20chat-%23cjdns-blue.svg)](https://kiwiirc.com/client/irc.efnet.org/?nick=visitor|?#cjdns)
 
@@ -223,7 +224,7 @@ Run cjdroute without options for HELP:
 
 ### 0. Make sure you've got the stuff.
 
-    cat /dev/net/tun
+    LANG=C cat /dev/net/tun
 
 If it says: `cat: /dev/net/tun: File descriptor in bad state` Good!
 
@@ -444,6 +445,28 @@ You can access the admin API with:
 
 * the **Python library**; see [here](contrib/python/README.md).
 * the **Perl library**, maintained by Mikey; see [here](contrib/perl/CJDNS/README).
+
+
+## Reporting issues
+1. Don't
+2. Get on IRC and talk to somebody
+3. What will happen is either
+ * Someone feels like fixing it
+ * You feel like fixing it
+ * Nobody cares about it and it will be forgotten for a while and maybe someone will hit it later
+ and fix it or else it will get wiped away in a refactoring
+ * Nobody can fix it at the moment but it is considered worth remembering because it has great
+ significance to the way the code is developed, in this case it needs to be explained in technical
+ terms by someone with strong familiarity with the code. They will make a pull request to the
+ docs/bugs directory.
+ 4. Alternatively you can report the issue on the https://github.com/hyperboria/cjdns.git repo.
+
+### Security
+Security issues should be reported on IRC the same as other bugs. We don't have a closed
+group of people with special knowledge so that means the default security reporting method is
+full disclosure.
+see: https://github.com/cjdelisle/cjdns/blob/master/doc/security_specification.md to see if a
+possible security issue is really a security issue.
 
 
 [IRC Web]: http://chat.efnet.org/irc.cgi?chan=%23cjdns
