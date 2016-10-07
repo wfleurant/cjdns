@@ -12,19 +12,21 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#ifndef Janitor_admin_H
-#define Janitor_admin_H
-
-#ifdef SUBNODE
-    #error "this file should not be included in subnode"
-#endif
-
+#include "crypto/random/Random.h"
 #include "memory/Allocator.h"
-#include "admin/Admin.h"
-#include "dht/dhtcore/Janitor.h"
-#include "util/Linker.h"
-Linker_require("dht/dhtcore/Janitor_admin.c");
+#include "memory/MallocAllocator.h"
 
-void Janitor_admin_register(struct Janitor* janitor, struct Admin* admin, struct Allocator* alloc);
+#include <stdio.h>
+#include <unistd.h>
 
-#endif
+int main()
+{
+    struct Allocator* alloc = MallocAllocator_new(1<<22);
+    struct Random* rand = Random_new(alloc, NULL, NULL);
+
+    uint8_t password[32];
+    Random_base32(rand, password, 32);
+    printf("%s\n", password);
+    return 0;
+}
+

@@ -430,6 +430,7 @@ static bool findBestParent0(struct Node_Two* node, struct NodeStore_pvt* store)
 
 static void findBestParent(struct Node_Two* node, struct NodeStore_pvt* store)
 {
+    uint64_t time0 = Time_hrtime(store->eventBase);
     if (!findBestParent0(node, store)) { return; }
     int ret = 0;
     int cycle = 0;
@@ -443,6 +444,10 @@ static void findBestParent(struct Node_Two* node, struct NodeStore_pvt* store)
             ret |= findBestParent0(n, store);
         }
     } while (ret);
+    uint64_t time1 = Time_hrtime(store->eventBase);
+    if ((int64_t)(time1 - time0) > (1000 * 1000000)) {
+        Log_debug(store->logger, "findBestParent() took [%lld] ns", (long long) (time1 - time0));
+    }
 }
 
 /**
@@ -1730,6 +1735,7 @@ struct NodeList* NodeStore_getPeers(uint64_t label,
         if (!Node_isOneHopLink(next) && p != 1) { continue; }
         if (p == UINT64_MAX) { continue; }
         if (p < label) { continue; }
+        if (next->child->address.path != p) { continue; }
         int j;
         for (j = 0; j < (int)max; j++) {
             if (!out->nodes[j]) { continue; }

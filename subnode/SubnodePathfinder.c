@@ -21,13 +21,13 @@
 #include "subnode/FindNodeResponder.h"
 #include "subnode/PingResponder.h"
 #include "subnode/BoilerplateResponder.h"
-#include "switch/NumberCompress.h"
+#include "subnode/ReachabilityCollector.h"
 #include "dht/Address.h"
 #include "wire/DataHeader.h"
 #include "wire/RouteHeader.h"
-#include "dht/ReplyModule.h"
-#include "dht/EncodingSchemeModule.h"
-#include "dht/SerializationModule.h"
+//#include "dht/ReplyModule.h"
+//#include "dht/EncodingSchemeModule.h"
+//#include "dht/SerializationModule.h"
 #include "dht/dhtcore/ReplySerializer.h"
 //#include "dht/dhtcore/RouterModule.h"
 //#include "dht/dhtcore/RouterModule_admin.h"
@@ -75,6 +75,16 @@ struct SubnodePathfinder_pvt
     struct NodeCache* nc;
 
     struct BoilerplateResponder* br;
+
+    struct ReachabilityAnnouncer* ra;
+
+    struct ReachabilityCollector* rc;
+
+    struct EncodingScheme* myScheme;
+
+    uint8_t* privateKey;
+
+    String* encodingSchemeStr;
 
     //struct DHTModuleRegistry* registry;
     //struct NodeStore* nodeStore;
@@ -376,6 +386,20 @@ static Iface_DEFUN searchReq(struct Message* msg, struct SubnodePathfinder_pvt* 
     return NULL;
 }
 
+static void rcChange(struct ReachabilityCollector* rc,
+                     uint8_t nodeIpv6[16],
+                     uint64_t pathThemToUs,
+                     uint64_t pathUsToThem,
+                     uint32_t mtu,
+                     uint16_t drops,
+                     uint16_t latency,
+                     uint16_t penalty)
+{
+    struct SubnodePathfinder_pvt* pf = Identity_check((struct SubnodePathfinder_pvt*) rc->userData);
+    ReachabilityAnnouncer_updatePeer(
+        pf->ra, nodeIpv6, pathThemToUs, pathUsToThem, mtu, drops, latency, penalty);
+}
+
 static Iface_DEFUN peer(struct Message* msg, struct SubnodePathfinder_pvt* pf)
 {
     struct Address addr;
@@ -521,15 +545,28 @@ static void sendEvent(struct SubnodePathfinder_pvt* pf,
 void SubnodePathfinder_start(struct SubnodePathfinder* sp)
 {
     struct SubnodePathfinder_pvt* pf = Identity_check((struct SubnodePathfinder_pvt*) sp);
-    pf->msgCore = MsgCore_new(pf->base, pf->rand, pf->alloc, pf->log);
+    pf->msgCore = MsgCore_new(pf->base, pf->rand, pf->alloc, pf->log, pf->myScheme);
     Iface_plumb(&pf->msgCoreIf, &pf->msgCore->interRouterIf);
 
     PingResponder_new(pf->alloc, pf->log, pf->msgCore, pf->br);
-    GetPeersResponder_new(pf->alloc, pf->log, pf->myPeers, pf->myAddress, pf->msgCore, pf->br);
+
+    GetPeersResponder_new(
+        pf->alloc, pf->log, pf->myPeers, pf->myAddress, pf->msgCore, pf->br, pf->myScheme);
+
     FindNodeResponder_new(pf->alloc, pf->log, pf->msgCore, pf->base, pf->br, pf->nc);
 
-    pf->pub.snh =
-        SupernodeHunter_new(pf->alloc, pf->log, pf->base, pf->myPeers, pf->msgCore, pf->myAddress);
+    pf->pub.snh = SupernodeHunter_new(
+        pf->alloc, pf->log, pf->base, pf->myPeers, pf->msgCore, pf->myAddress);
+
+    pf->ra = ReachabilityAnnouncer_new(
+        pf->alloc, pf->log, pf->base, pf->rand, pf->msgCore, pf->pub.snh, pf->privateKey,
+            pf->myScheme);
+
+    pf->rc = ReachabilityCollector_new(
+        pf->alloc, pf->msgCore, pf->log, pf->base, pf->br, pf->myAddress);
+
+    pf->rc->userData = pf;
+    pf->rc->onChange = rcChange;
 
     struct PFChan_Pathfinder_Connect conn = {
         .superiority_be = Endian_hostToBigEndian32(1),
@@ -543,7 +580,9 @@ struct SubnodePathfinder* SubnodePathfinder_new(struct Allocator* allocator,
                                                 struct Log* log,
                                                 struct EventBase* base,
                                                 struct Random* rand,
-                                                struct Address* myAddress)
+                                                struct Address* myAddress,
+                                                uint8_t* privateKey,
+                                                struct EncodingScheme* myScheme)
 {
     struct Allocator* alloc = Allocator_child(allocator);
     struct SubnodePathfinder_pvt* pf =
@@ -558,7 +597,7 @@ struct SubnodePathfinder* SubnodePathfinder_new(struct Allocator* allocator,
     pf->pub.eventIf.send = incomingFromEventIf;
     pf->msgCoreIf.send = incomingFromMsgCore;
 
-    struct EncodingScheme* myScheme = NumberCompress_defineScheme(alloc);
+    pf->myScheme = myScheme;
     pf->br = BoilerplateResponder_new(myScheme, alloc);
     pf->nc = NodeCache_new(alloc, log, myAddress, base);
 
