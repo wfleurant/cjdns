@@ -10,14 +10,25 @@ set -ex
 #   docker exec -it cjdns[-<name>] dumptable
 #   docker exec -it cjdns[-<name>] <any-command-from-tools/>
 #   cat contrib/docker/cjdns[-<name>]/cjdroute.conf
+# Public Peering Usage:
+#   PUBLIC_PEERS=ENABLED contrib/docker/run [<name>]
 
 # Location of cjdroute.conf within the container
 CONF_DIR="/etc/cjdns"
+PUBLIC_PEERS=${PUBLIC_PEERS:-DISABLED}
 
 [ "$1" = "" ] && name="cjdns" || name="cjdns-$1"
+
+if [ "x$PUBLIC_PEERS" == "xDISABLED" ]; then
+    PEERS_VOLUME=""
+else
+    PUBLIC_PEERS=ENABLED
+    PEERS_VOLUME="--volume=\"$(pwd)/contrib/python/peers.d:\"$CONF_DIR/peers.d\""
+fi
 
 docker build -f contrib/docker/Dockerfile -t $name .
 
 exec docker run -it --rm --name=$name \
                 --cap-add=NET_ADMIN --device=/dev/net/tun \
+                --env PUBLIC_PEERS="$PUBLIC_PEERS" $PEERS_VOLUME \
                 --volume="$(pwd)/contrib/docker/$name:$CONF_DIR" $name

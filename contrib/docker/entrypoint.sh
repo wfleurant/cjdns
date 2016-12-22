@@ -10,5 +10,11 @@ if [ ! -f "$CONF_DIR/cjdroute.conf" ]; then
   echo $conf > "$CONF_DIR/cjdroute.conf"
 fi
 
+if [ "x$PUBLIC_PEERS" == "xENABLED" ]; then
+  echo "latest public peers enabled"
+  conf=$(cjdroute --genconf | cjdroute --cleanconf)
+
+fi
+
 cjdroute --nobg < "$CONF_DIR/cjdroute.conf"
 exit $?

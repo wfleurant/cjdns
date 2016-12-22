@@ -1,0 +1,49 @@
+#!/usr/bin/env node
+/* -*- Mode:Js */
+/* vim: set expandtab ts=4 sw=4: */
+/* automatically connect to hype peers, yo. */
+var Peers = require("hyperboria-peers");
+
+/*  return a list of public peers located in North America */
+NA = Peers.filter(function (creds, path) {
+    return path.indexOf('NA') !== -1;
+});
+
+/*  return a list of public keys */
+Peers.map(function (creds, path) {
+    return creds[Object.keys(creds)[0]].publicKey;
+});
+
+var Cjdns = require('./lib/cjdnsadmin/cjdnsadmin');
+var nThen = require('nthen');
+
+var cjdns;
+nThen(function (waitFor) {
+    Cjdns.connectWithAdminInfo(waitFor(function (c) { cjdns = c; }));
+}).nThen(function (waitFor) {
+    var code;
+    pubpeers = Peers.map(function(creds) {
+        return {
+            "q": "UDPInterface_beginConnection",
+            "args": {
+                "address": [Object.keys(creds)[0]][0],
+                "login": (typeof(creds[Object.keys(creds)[0]].login) === 'undefined')
+                                ? '' : creds[Object.keys(creds)[0]].login,
+                "password": creds[Object.keys(creds)[0]].password,
+                "publicKey": creds[Object.keys(creds)[0]].publicKey
+            }
+        }
+    });
+    code = 'UDPInterface_beginConnection';
+    for (var i = pubpeers.length - 1; i >= 0; i--) {
+        var piratenpartei = 'UDPInterface_beginConnection('
+            + "'" + pubpeers[i]['args']['publicKey'] + "',"
+            + "'" + pubpeers[i]['args']['address']  + "',"
+            + "'" + pubpeers[i]['args']['password'] + "',"
+            + "cb)";
+        var f = new Function('x', 'cb', 'x.' + piratenpartei);
+        f(cjdns, function (err, ret) {
+            if (err) { throw err; }
+        });
+    }
+});
