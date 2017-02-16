@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include "memory/Allocator.h"
 #include "wire/PFChan.h"
@@ -22,6 +22,7 @@
 #include "util/Defined.h"
 #include "wire/RouteHeader.h"
 #include "util/events/Timeout.h"
+#include "util/Checksum.h"
 
 /** Handle numbers 0-3 are reserved for CryptoAuth nonces. */
 #define MIN_FIRST_HANDLE 4
@@ -226,6 +227,40 @@ static struct SessionManager_Session_pvt* getSession(struct SessionManager_pvt* 
     return sess;
 }
 
+static Iface_DEFUN ctrlFrame(struct Message* msg, struct SessionManager_pvt* sm)
+{
+    struct RouteHeader rh;
+    Bits_memset(&rh, 0, RouteHeader_SIZE);
+    Message_pop(msg, &rh.sh, SwitchHeader_SIZE, NULL);
+    Message_pop(msg, NULL, 4, NULL);
+    rh.flags = RouteHeader_flags_INCOMING | RouteHeader_flags_CTRLMSG;
+    Message_push(msg, &rh, RouteHeader_SIZE, NULL);
+    return Iface_next(&sm->pub.insideIf, msg);
+}
+
+static Iface_DEFUN failedDecrypt(struct Message* msg,
+                                 uint64_t label_be,
+                                 struct SessionManager_pvt* sm)
+{
+    Message_push32(msg, Error_AUTHENTICATION, NULL);
+    Message_push16(msg, Control_ERROR, NULL);
+    Message_push16(msg, 0, NULL);
+    uint16_t csum = Checksum_engine(msg->bytes, msg->length);
+    Message_pop16(msg, NULL);
+    Message_push16(msg, csum, NULL);
+
+    Message_push32(msg, 0xffffffff, NULL);
+
+    struct SwitchHeader sh;
+    Bits_memset(&sh, 0, SwitchHeader_SIZE);
+    SwitchHeader_setSuppressErrors(&sh, true);
+    SwitchHeader_setVersion(&sh, SwitchHeader_CURRENT_VERSION);
+    sh.label_be = label_be;
+    Message_push(msg, &sh, SwitchHeader_SIZE, NULL);
+
+    return Iface_next(&sm->pub.switchIf, msg);
+}
+
 static Iface_DEFUN incomingFromSwitchIf(struct Message* msg, struct Iface* iface)
 {
     struct SessionManager_pvt* sm =
@@ -241,8 +276,24 @@ static Iface_DEFUN incomingFromSwitchIf(struct Message* msg, struct Iface* iface
     struct SwitchHeader* switchHeader = (struct SwitchHeader*) msg->bytes;
     Message_shift(msg, -SwitchHeader_SIZE, NULL);
 
+    // The label comes in reversed from the switch because the switch doesn't know that we aren't
+    // another switch ready to parse more bits, bit reversing the label yields the source address.
+    // (the field is still big endian!)
+    switchHeader->label_be = Bits_bitReverse64(switchHeader->label_be);
+
     struct SessionManager_Session_pvt* session;
     uint32_t nonceOrHandle = Endian_bigEndianToHost32(((uint32_t*)msg->bytes)[0]);
+    if (nonceOrHandle == 0xffffffff) {
+        Message_shift(msg, SwitchHeader_SIZE, NULL);
+        return ctrlFrame(msg, sm);
+    }
+
+    // This is for handling error situations and being able to send back some kind of a message.
+    uint8_t firstSixteen[16];
+    uint32_t length0 = msg->length;
+    Assert_true(msg->length >= 16);
+    Bits_memcpy(firstSixteen, msg->bytes, 16);
+
     if (nonceOrHandle > 3) {
         // > 3 it's a handle.
         session = sessionForHandle(nonceOrHandle, sm);
@@ -276,19 +327,29 @@ static Iface_DEFUN incomingFromSwitchIf(struct Message* msg, struct Iface* iface
         debugHandlesAndLabel(sm->log, session, label, "new session nonce[%d]", nonceOrHandle);
     }
 
-    if (CryptoAuth_decrypt(session->pub.caSession, msg)) {
+    bool currentMessageSetup = (nonceOrHandle <= 3);
+
+    enum CryptoAuth_DecryptErr ret = CryptoAuth_decrypt(session->pub.caSession, msg);
+    if (ret) {
         debugHandlesAndLabel(sm->log, session,
                              Endian_bigEndianToHost64(switchHeader->label_be),
                              "DROP Failed decrypting message NoH[%d] state[%s]",
                              nonceOrHandle,
                              CryptoAuth_stateString(CryptoAuth_getState(session->pub.caSession)));
-        return NULL;
+        Message_shift(msg, length0 - msg->length - 24, NULL);
+        msg->length = 0;
+        Message_push32(msg, CryptoAuth_getState(session->pub.caSession), NULL);
+        Message_push32(msg, ret, NULL);
+        Message_push(msg, firstSixteen, 16, NULL);
+        Message_shift(msg, SwitchHeader_SIZE, NULL);
+        Assert_true(msg->bytes == (uint8_t*)switchHeader);
+        uint64_t label_be = switchHeader->label_be;
+        switchHeader->label_be = Bits_bitReverse64(switchHeader->label_be);
+        return failedDecrypt(msg, label_be, sm);
     }
 
     session->pub.timeOfLastIn = Time_currentTimeMilliseconds(sm->eventBase);
     session->pub.bytesIn += msg->length;
-
-    bool currentMessageSetup = (nonceOrHandle <= 3);
 
     if (currentMessageSetup) {
         session->pub.sendHandle = Message_pop32(msg, NULL);
@@ -359,9 +420,19 @@ static void triggerSearch(struct SessionManager_pvt* sm, uint8_t target[16])
 static void checkTimedOutSessions(struct SessionManager_pvt* sm)
 {
     bool searchTriggered = false;
-    for (int i = 0; i < (int)sm->ifaceMap.count; i++) {
+    for (int i = (int)sm->ifaceMap.count - 1; i >= 0; i--) {
         struct SessionManager_Session_pvt* sess = sm->ifaceMap.values[i];
         int64_t now = Time_currentTimeMilliseconds(sm->eventBase);
+
+        // Check if the session is timed out...
+        if (now - sess->pub.timeOfLastIn > sm->pub.sessionTimeoutMilliseconds) {
+            debugSession0(sm->log, sess, "ended");
+            sendSession(sess, sess->pub.sendSwitchLabel, 0xffffffff, PFChan_Core_SESSION_ENDED);
+            Map_OfSessionsByIp6_remove(i, &sm->ifaceMap);
+            Allocator_free(sess->alloc);
+            continue;
+        }
+
         if (now - sess->pub.timeOfLastOut >= sm->pub.sessionIdleAfterMilliseconds &&
             now - sess->pub.timeOfLastIn >= sm->pub.sessionIdleAfterMilliseconds)
         {
@@ -374,16 +445,6 @@ static void checkTimedOutSessions(struct SessionManager_pvt* sm)
             triggerSearch(sm, sess->pub.caSession->herIp6);
             sess->pub.lastSearchTime = now;
             searchTriggered = true;
-            continue;
-        }
-
-        // Session is in idle state or doesn't need a search right now, check if it's timed out.
-        if (now - sess->pub.timeOfLastIn > sm->pub.sessionTimeoutMilliseconds) {
-            debugSession0(sm->log, sess, "ended");
-            sendSession(sess, sess->pub.sendSwitchLabel, 0xffffffff, PFChan_Core_SESSION_ENDED);
-            Map_OfSessionsByIp6_remove(i, &sm->ifaceMap);
-            Allocator_free(sess->alloc);
-            i--;
         }
     }
 }
@@ -444,7 +505,7 @@ static Iface_DEFUN readyToSend(struct Message* msg,
     Message_shift(msg, -RouteHeader_SIZE, NULL);
     struct SwitchHeader* sh;
     CryptoAuth_resetIfTimeout(sess->pub.caSession);
-    if (CryptoAuth_getState(sess->pub.caSession) < CryptoAuth_HANDSHAKE3) {
+    if (CryptoAuth_getState(sess->pub.caSession) < CryptoAuth_State_RECEIVED_KEY) {
         // Put the handle into the message so that it's authenticated.
         Message_push32(msg, sess->pub.receiveHandle, NULL);
 
@@ -465,7 +526,7 @@ static Iface_DEFUN readyToSend(struct Message* msg,
 
     Assert_true(!CryptoAuth_encrypt(sess->pub.caSession, msg));
 
-    if (CryptoAuth_getState(sess->pub.caSession) >= CryptoAuth_HANDSHAKE3) {
+    if (CryptoAuth_getState(sess->pub.caSession) >= CryptoAuth_State_RECEIVED_KEY) {
         if (0) { // Noisy
             debugHandlesAndLabel0(sm->log,
                                   sess,
@@ -493,12 +554,36 @@ static Iface_DEFUN readyToSend(struct Message* msg,
     return Iface_next(&sm->pub.switchIf, msg);
 }
 
+static Iface_DEFUN outgoingCtrlFrame(struct Message* msg, struct SessionManager_pvt* sm)
+{
+    Assert_true(msg->length >= RouteHeader_SIZE);
+    struct RouteHeader* header = (struct RouteHeader*) msg->bytes;
+    if (!Bits_isZero(header->publicKey, 32) || !Bits_isZero(header->ip6, 16)) {
+        Log_debug(sm->log, "DROP Ctrl frame with non-zero destination key or IP");
+        return NULL;
+    }
+    if (!(header->flags & RouteHeader_flags_CTRLMSG)) {
+        Log_debug(sm->log, "DROP Ctrl frame w/o RouteHeader_flags_CTRLMSG flag");
+        return NULL;
+    }
+    struct SwitchHeader sh;
+    Bits_memcpy(&sh, &header->sh, SwitchHeader_SIZE);
+    Message_pop(msg, NULL, RouteHeader_SIZE, NULL);
+    Message_push32(msg, 0xffffffff, NULL);
+    Message_push(msg, &sh, SwitchHeader_SIZE, NULL);
+    return Iface_next(&sm->pub.switchIf, msg);
+}
+
 static Iface_DEFUN incomingFromInsideIf(struct Message* msg, struct Iface* iface)
 {
     struct SessionManager_pvt* sm =
         Identity_containerOf(iface, struct SessionManager_pvt, pub.insideIf);
-    Assert_true(msg->length >= RouteHeader_SIZE + DataHeader_SIZE);
+    Assert_true(msg->length >= RouteHeader_SIZE);
     struct RouteHeader* header = (struct RouteHeader*) msg->bytes;
+    if (header->flags & RouteHeader_flags_CTRLMSG) {
+        return outgoingCtrlFrame(msg, sm);
+    }
+    Assert_true(msg->length >= RouteHeader_SIZE + DataHeader_SIZE);
     struct DataHeader* dataHeader = (struct DataHeader*) &header[1];
 
     struct SessionManager_Session_pvt* sess = sessionForIp6(header->ip6, sm);
@@ -536,7 +621,7 @@ static Iface_DEFUN incomingFromInsideIf(struct Message* msg, struct Iface* iface
     // Forward secrecy, only send dht messages until the session is setup.
     CryptoAuth_resetIfTimeout(sess->pub.caSession);
     if (DataHeader_getContentType(dataHeader) != ContentType_CJDHT &&
-        CryptoAuth_getState(sess->pub.caSession) < CryptoAuth_HANDSHAKE3)
+        CryptoAuth_getState(sess->pub.caSession) < CryptoAuth_State_RECEIVED_KEY)
     {
         needsLookup(sm, msg);
         return NULL;
@@ -600,7 +685,7 @@ static Iface_DEFUN incomingFromEventIf(struct Message* msg, struct Iface* iface)
     }
 
     // Send what's on the buffer...
-    if (index > -1 && CryptoAuth_getState(sess->pub.caSession) >= CryptoAuth_HANDSHAKE3) {
+    if (index > -1 && CryptoAuth_getState(sess->pub.caSession) >= CryptoAuth_State_RECEIVED_KEY) {
         struct BufferedMessage* bm = sm->bufMap.values[index];
         Iface_CALL(readyToSend, bm->msg, sm, sess);
         Map_BufferedMessages_remove(index, &sm->bufMap);

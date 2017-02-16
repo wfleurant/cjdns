@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include "net/Benchmark.h"
 #include "memory/MallocAllocator.h"
@@ -179,8 +179,9 @@ static void switching(struct Context* ctx)
                                                 alloc);
     Assert_true(!ret);
 
-    Iface_unplumb(alice->switchAdapter->controlIf.connectedIf, &alice->switchAdapter->controlIf);
-    Iface_plumb(&alice->switchAdapter->controlIf, &sc->aliceCtrlIf);
+    Iface_unplumb(alice->upper->controlHandlerIf.connectedIf,
+                  &alice->upper->controlHandlerIf);
+    Iface_plumb(&alice->upper->controlHandlerIf, &sc->aliceCtrlIf);
 
     struct Message* msg = Message_new(Control_Ping_MIN_SIZE + Control_Header_SIZE, 256, alloc);
     struct Control_Header* ch = (struct Control_Header*) msg->bytes;

@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include "benc/String.h"
 #include "benc/Dict.h"
@@ -151,8 +151,22 @@ uint64_t EncodingScheme_convertLabel(struct EncodingScheme* scheme,
 }
 
 /**
- * Decode a form from it's binary representation.
+ * Decode a form from its binary representation.
  * Can only use a maximum of 41 bits.
+ *
+ * One or more of these binary representation are bitwise concatenated to
+ * give an unsigned integer; which is encoded in **little endian** to give
+ * the serialization of Encoding Scheme.
+ *
+ * Ten least significant bits of a form are:
+ *
+ *                     1
+ *     0 1 2 3 4 5 6 7 0 1
+ *    +-+-+-+-+-+-+-+-+-+-+
+ *  0 | bitcount| preflen |
+ *    +-+-+-+-+-+-+-+-+-+-+
+ *
+ * Previous 'preflen' bits are the prefix
  *
  * @param out the output which will be populated with the encoding form data.
  * @param data the binary data in host order.

@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 var Os = require('os');
 var Fs = require('fs');
@@ -916,6 +916,11 @@ var configure = module.exports.configure = function (params, configFunc) {
                 if (err) { throw err; }
 
                 state = JSON.parse(ret);
+                // cflags, ldflags and libs are setup by make.js and should not be restored.
+                state.cflags = [];
+                state.ldflags = [];
+                state.libs = [];
+                state.includeDirs = ['.'];
             }));
         }));
 

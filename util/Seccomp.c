@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 // sigaction() siginfo_t SIG_UNBLOCK
@@ -337,6 +337,12 @@ static struct sock_fprog* mkFilter(struct Allocator* alloc, struct Except* eh)
         #ifdef __NR_getsockname
         IFEQ(__NR_getsockname, success),
         #endif
+
+        // musl free() calls madvise()
+        #ifdef __NR_madvise
+        IFEQ(__NR_madvise, success),
+        #endif
+
         RET(SECCOMP_RET_TRAP),
 
         LABEL(socket),

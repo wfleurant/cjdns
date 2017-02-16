@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 var Fs = require('fs');
 var nThen = require('nthen');
@@ -49,14 +49,6 @@ Builder.configure({
     optimizeLevel:  '-O3',
     logLevel:       process.env['Log_LEVEL'] || 'DEBUG'
 }, function (builder, waitFor) {
-
-    // This is a hack to cover for the fact that builder.js stores the cflags
-    // then more cflags get piled on top of them. TODO(cjd): Fix this is builder.js.
-    for (var i = 0; i < builder.config.cflags.length; i++) {
-        if (/CJD_PACKAGE_VERSION/.test(builder.config.cflags[i])) {
-            builder.config.cflags.splice(i-1, 2);
-        }
-    }
 
     builder.config.cflags.push(
         '-std=c99',

@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include "interface/Iface.h"
 #include "interface/FramingIface.h"
@@ -57,9 +57,10 @@ int main()
     struct Allocator* alloc = MallocAllocator_new(1<<20);
     struct Context* ctx = Allocator_calloc(alloc, sizeof(struct Context), 1);
     Identity_set(ctx);
-    struct Iface* fi = FramingIface_new(1024, &ctx->dummyIf, alloc);
     ctx->iface.send = messageOut;
-    Iface_plumb(&ctx->iface, fi);
+    struct FramingIface* framingIf = FramingIface_new(1024, 512, alloc);
+    Iface_plumb(&ctx->dummyIf, &framingIf->streamIf);
+    Iface_plumb(&ctx->iface, &framingIf->messageIf);
     struct Message* output = NULL;
     ctx->receivedMsg = &output;
 

@@ -49,19 +49,19 @@ The `authorizedPasswords` section is the area where you can specify passwords to
     "authorizedPasswords":
     [
         // A unique string which is known to the client and server.
-        {"password": "zxl6zgxpl4stnuybdt0xlg4tn2cdl5h"}
+        {"password": "zxl6zgxpl4stnuybdt0xlg4tn2cdl5h", "user": "default-login"}
 
         // More passwords should look like this.
-        // {"password": "10ru8br0mhk25ccpvubv0sqnl7kuc6s"},
-        // {"password": "y68jm490dztxn3d2gvuv09bz55wqmjj"},
-        // {"password": "bnpphnq205v8nf2ksrs1fknfr572xzc"},
+        // {"password": "10ru8br0mhk25ccpvubv0sqnl7kuc6s", "user": "my-second-peer"},
+        // {"password": "y68jm490dztxn3d2gvuv09bz55wqmjj", "user": "my-third-peer"},
+        // {"password": "bnpphnq205v8nf2ksrs1fknfr572xzc", "user": "my-fourth-peer"},
 
         // These are your connection credentials
         // for people connecting to you with your default password.
         // adding more passwords for different users is advisable
         // so that leaks can be isolated.
         //
-        // "your.external.ip.goes.here:33808":{"password":"zxl6zgxpl4stnuybdt0xlg4tn2cdl5h","publicKey":"u2jf87mgqlxfzdnywp60z3tx6tkulvgh2nyc2jk1zc69zzt2s8u0.k"}
+        // "your.external.ip.goes.here:33808":{"login": "default-login", "password":"zxl6zgxpl4stnuybdt0xlg4tn2cdl5h","publicKey":"u2jf87mgqlxfzdnywp60z3tx6tkulvgh2nyc2jk1zc69zzt2s8u0.k"}
     ],
 ````
 - `password`: This is the password that another system can give to your node and be allowed to connect. You would place it in the `password` section in the next part.
@@ -169,7 +169,7 @@ This specifies the settings for the connection interfaces to your node. Right no
     - `bind`: This tells cjdns which device the ETHInterface should bind to. This may be different depending on your setup.
     - `connectTo`: The connectTo for the ETHInterface functions almost exactly like it does for the the UDPInterface, except instead of an IP address and a port at the beginning, it is a MAC address.
     - `beacon`: This controls peer auto-discovery. Set to 0 to disable auto-peering, 1 to use broadcast auto-peering passwords contained in "beacon" messages from other nodes, and 2 to both broadcast and accept beacons.
-    - In earlier versions of cjdns, it was necessary to uncomment the ETHInterface if you want to use it, however, now it is uncommented by default in the `crashey` branch which will eventually be merged to master.
+    - In earlier versions of cjdns, it was necessary to uncomment the ETHInterface if you want to use it, however, now it is uncommented by default.
 
 Router
 ------

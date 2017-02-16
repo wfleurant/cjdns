@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include "memory/MallocAllocator.h"
 #include "dht/Address.h"
@@ -70,6 +70,7 @@ static void getPeersTest(struct EventBase* base, struct Log* logger, struct Allo
 {
     struct Address* myAddr = Address_fromString(String_new(MY_ADDR, alloc), alloc);
     struct NodeStore* ns = NodeStore_new(myAddr, alloc, base, logger, NULL);
+    NodeStore_setFullVerify(ns, true);
     for (int i = 0; ADDRS[i]; i++) {
         addNode(ns, ADDRS[i], alloc);
     }

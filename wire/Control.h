@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #ifndef Control_H
 #define Control_H
@@ -22,7 +22,8 @@
 /**
  * Type two, error.
  */
-#define Control_ERROR_be Endian_hostToBigEndian16(2)
+#define Control_ERROR 2
+#define Control_ERROR_be Endian_hostToBigEndian16(Control_ERROR)
 #define Control_Error_HEADER_SIZE 4
 #define Control_Error_MIN_SIZE (Control_Error_HEADER_SIZE + SwitchHeader_SIZE + 4)
 #define Control_Error_MAX_SIZE 256

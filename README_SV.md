@@ -1,8 +1,12 @@
 # cjdns
 
-[Engelska](README.md)
-[Ryska](README_RU.md)
-[Kroatiska](README_HR.md)
+[English](README.md)
+[Русская версия](README_RU.md)
+[Hrvatski](README_HR.md)
+[Ελληνικά](README_GR.md)
+[Deutsch](README_DE.md)
+[繁體中文](README_ZHT.md)
+[Español](README_ES.md)
 
 #### *Datornätverk - Ett nytt sätt*
 
@@ -41,7 +45,6 @@ många skalnings- och säkerhetsproblem som andra nätverk har.
 
 * [irc://irc.efnet.org/#cjdns][IRC Web]
 * [Hyperboria][], det största cjdns-nätverket, över 2100 noder i Oktober 2015.
-* [Project Meshnet][]
 * [/r/darknetplan][]
 * [#cjdns på Twitter][]
 
@@ -239,15 +242,15 @@ Leta upp `authorizedPasswords`-attributet i din konfigurationsfil:
 "authorizedPasswords":
 [
     // A unique string which is known to the client and server.
-    {"password": "thisisauniquestring_001"}
+    {"password": "password001", "login": "default-login"}
 
     // More passwords should look like this.
-    // {"password": "thisisauniquestring_002"}
-    // {"password": "thisisauniquestring_003"}
-    // {"password": "thisisauniquestring_004"}
+    // {"password": "password002", "login": "my-second-peer"}
+    // {"password": "password003", "login": "my-third-peer}
+    // {"password": "password004", "login": "my-fourth-peer"}
     ...
 
-    // "your.external.ip.goes.here:45678":{"password": "thisisauniquestring_001","publicKey":thisisauniqueKEY_001.k"}
+    // "your.external.ip.goes.here:45678":{"login": "default-login", "password": "password001","publicKey":thisisauniqueKEY_001.k"}
 
 ],
 ```
@@ -353,11 +356,10 @@ Det finns flera olika verktyg i `contrib/` som kan interagera med det, bl.a.:
 * **perl**, maintained by Mikey; se [contrib/perl/CJDNS/README](contrib/perl/CJDNS/README).
 
 [IRC Web]: http://chat.efnet.org/irc.cgi?chan=%23cjdns
-[Hyperboria]: http://hyperboria.net
-[Project Meshnet]: https://projectmeshnet.org
-[/r/darknetplan]: http://www.reddit.com/r/darknetplan
+[Hyperboria]: https://hyperboria.net
+[/r/darknetplan]: https://www.reddit.com/r/darknetplan
 [#cjdns på Twitter]: https://twitter.com/hashtag/cjdns
-[Hyperboria Map]: http://www.fc00.org/
+[Hyperboria Map]: https://www.fc00.org/
 [Buildbots]: https://buildbot.meshwith.me/cjdns/waterfall
 
 [Cjdns på Wikipedia]: https://en.wikipedia.org/wiki/Cjdns
@@ -366,5 +368,5 @@ Det finns flera olika verktyg i `contrib/` som kan interagera med det, bl.a.:
 [Kademlia]: https://en.wikipedia.org/wiki/Kademlia
 
 [Tor]: https://www.torproject.org
-[I2P]: http://www.i2p2.de
+[I2P]: https://geti2p.net/en/
 [Freenet]: https://freenetproject.org

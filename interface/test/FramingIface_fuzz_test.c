@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include "interface/FramingIface.h"
 #include "crypto/random/Random.h"
@@ -76,8 +76,9 @@ int main(int argc, char** argv)
     Identity_set(ctx);
     ctx->internalIf.send = messageOut;
     struct Iface externalIf = { .send = NULL };
-    struct Iface* fi = FramingIface_new(4096, &externalIf, mainAlloc);
-    Iface_plumb(fi, &ctx->internalIf);
+    struct FramingIface* framingIface = FramingIface_new(4096, 512, mainAlloc);
+    Iface_plumb(&framingIface->messageIf, &ctx->internalIf);
+    Iface_plumb(&framingIface->streamIf, &externalIf);
 
     int cycles = QUICK_CYCLES;
     for (int i = 0; i < argc; i++) {

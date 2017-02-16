@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include "crypto/random/Random.h"
 #include "crypto/CryptoAuth.h"
@@ -218,8 +218,8 @@ static void sendFrom(struct Context* ctx, struct Node* from, struct Message* msg
             Assert_true(!CryptoAuth_encrypt(to->session, msg));
             to->sendCounter++;
             sendFrom(ctx, to, msg);
-        } else if (CryptoAuth_getState(ctx->nodeA.session) == CryptoAuth_ESTABLISHED &&
-            CryptoAuth_getState(ctx->nodeB.session) == CryptoAuth_ESTABLISHED)
+        } else if (CryptoAuth_getState(ctx->nodeA.session) == CryptoAuth_State_ESTABLISHED &&
+            CryptoAuth_getState(ctx->nodeB.session) == CryptoAuth_State_ESTABLISHED)
         {
             ctx->successMessageCount++;
         }

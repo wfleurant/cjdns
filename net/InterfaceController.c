@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include "crypto/AddressCalc.h"
 #include "crypto/CryptoAuth_pvt.h"
@@ -309,11 +309,22 @@ static void iciPing(struct InterfaceController_Iface_pvt* ici, struct InterfaceC
         struct Peer* ep = ici->peerMap.values[i];
 
         if (now < ep->timeOfLastMessage + ic->pingAfterMilliseconds) {
-            if (now < ep->timeOfLastPing + ic->pingAfterMilliseconds) {
-                // Possibly an out-of-date node which is mangling packets, don't ping too often
-                // because it causes the RumorMill to be filled with this node over and over.
-                continue;
+            // It's sending traffic so leave it alone.
+
+            // wait just a minute here !
+            // There is a risk that the NodeStore somehow forgets about our peers while the peers
+            // are still happily sending traffic. To break this bad cycle lets just send a PEER
+            // message once per second for whichever peer is the first that we address.
+            if (i == startAt && ep->state == InterfaceController_PeerState_ESTABLISHED) {
+                sendPeer(0xffffffff, PFChan_Core_PEER, ep);
             }
+
+            continue;
+        }
+        if (now < ep->timeOfLastPing + ic->pingAfterMilliseconds) {
+            // Possibly an out-of-date node which is mangling packets, don't ping too often
+            // because it causes the RumorMill to be filled with this node over and over.
+            continue;
         }
 
         uint8_t keyIfDebug[56];
@@ -391,7 +402,12 @@ static void moveEndpointIfNeeded(struct Peer* ep)
             Assert_true(ep->switchIf.connectedIf->send);
             Assert_true(thisEp->switchIf.connectedIf->send);
             Allocator_free(thisEp->alloc);
-            Assert_true(!thisEp->switchIf.connectedIf->send);
+
+            // This check cannot really be relied upon because thisEp->alloc is what
+            // allocates thisEp and if the free is not blocked by an asynchronous onFree job
+            // then it could overwrite and free the memory in which case the assertion would fail.
+            //Assert_true(!thisEp->switchIf.connectedIf->send);
+
             Assert_true(ep->switchIf.connectedIf->send);
             return;
         }
@@ -414,7 +430,7 @@ static Iface_DEFUN receivedPostCryptoAuth(struct Message* msg,
         Bits_memcpy(ep->addr.key, ep->caSession->herPublicKey, 32);
         Address_getPrefix(&ep->addr);
 
-        if (caState == CryptoAuth_ESTABLISHED) {
+        if (caState == CryptoAuth_State_ESTABLISHED) {
             moveEndpointIfNeeded(ep);
             //sendPeer(0xffffffff, PFChan_Core_PEER, ep);// version is not known at this point.
         } else {
@@ -441,7 +457,7 @@ static Iface_DEFUN receivedPostCryptoAuth(struct Message* msg,
             }
         }
     } else if (ep->state == InterfaceController_PeerState_UNRESPONSIVE
-        && caState == CryptoAuth_ESTABLISHED)
+        && caState == CryptoAuth_State_ESTABLISHED)
     {
         ep->state = InterfaceController_PeerState_ESTABLISHED;
         SwitchCore_setInterfaceState(&ep->switchIf, SwitchCore_setInterfaceState_ifaceState_UP);

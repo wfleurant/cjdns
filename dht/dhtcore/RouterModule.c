@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include "benc/String.h"
 #include "dht/Address.h"
@@ -41,15 +41,15 @@
 
 /*
  * The router module is the central part of the DHT engine.
- * It's job is to maintain a routing table which is updated by all incoming packets.
+ * Its job is to maintain a routing table which is updated by all incoming packets.
  * When it gets an incoming query, its job is to add nodes to the reply so that the asking node
  * can find other nodes which are closer to its target than us.
  *
- * This implementation does not split nodes explicitly into buckets not does it explicitly try to
+ * This implementation does not split nodes explicitly into buckets nor does it explicitly try to
  * distinguish between "good" and "bad" nodes. Instead it tries to determine which node will help
  * get to the requested record the fastest. Instead of periodicly pinging a random node in each
  * "bucket", this implementation periodically searches for a random[1] hash. When a node is sent a
- * query, the the distance[2] between it and the first node is divided by the amount of time it
+ * query, the distance[2] between it and the first node is divided by the amount of time it
  * takes the node to respond, for each successful search, this number is added to an attribute of
  * the node called "reach".
  *

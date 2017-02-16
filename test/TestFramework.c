@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include "crypto/random/Random.h"
 #include "crypto/CryptoAuth.h"
@@ -33,7 +33,6 @@
 #include "tunnel/IpTunnel.h"
 #include "net/EventEmitter.h"
 #include "net/SessionManager.h"
-#include "net/SwitchAdapter.h"
 #include "net/UpperDistributor.h"
 #include "net/TUNAdapter.h"
 #include "wire/Headers.h"
@@ -119,6 +118,7 @@ struct TestFramework* TestFramework_setUp(char* privateKey,
     struct NetCore* nc = NetCore_new(privateKey, allocator, base, rand, logger);
 
     struct Pathfinder* pf = Pathfinder_register(allocator, logger, base, rand, NULL);
+    pf->fullVerify = true;
     struct ASynchronizer* pfAsync = ASynchronizer_new(allocator, base, logger);
     Iface_plumb(&pfAsync->ifA, &pf->eventIf);
     EventEmitter_regPathfinderIface(nc->ee, &pfAsync->ifB);

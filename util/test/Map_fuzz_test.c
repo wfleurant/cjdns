@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include "crypto/random/Random.h"
 #include "memory/MallocAllocator.h"
@@ -67,9 +67,10 @@ int main(int argc, char* argv[])
             keys[i] = key;
             vals[i] = val;
             Map_OfLongsByInteger_put(&key, &val, map);
-            key += val >> 13 ^ size << 19;
+            key += ((val >> 13 ^ size << 19) & 0x000fffff) + 1;
+            //Log_debug(logger, "%u", (val >> 13 ^ size << 19) & 0x000fffff);
+            Assert_true(key > keys[i]);
             val += key >> 19 ^ i << 13;
-
         }
         int64_t timeUsed = Time_hrtime() - begin;
         Log_debug(logger, "cycle %d Map put %u values used %lu ms.\n",

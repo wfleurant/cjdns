@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #ifndef NodeStore_H
 #define NodeStore_H
@@ -230,5 +230,9 @@ struct NodeList* NodeStore_getNodesForBucket(struct NodeStore* nodeStore,
                                              struct Allocator* allocator,
                                              uint16_t bucket,
                                              const uint32_t count);
+
+
+bool NodeStore_getFullVerify(struct NodeStore* nodeStore);
+void NodeStore_setFullVerify(struct NodeStore* nodeStore, bool fullVerify);
 
 #endif

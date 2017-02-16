@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #ifndef CryptoAuth_H
 #define CryptoAuth_H
@@ -34,12 +34,6 @@ Linker_require("crypto/CryptoAuth.c");
 struct CryptoAuth
 {
     uint8_t publicKey[32];
-
-    /**
-     * After this number of seconds of inactivity,
-     * a connection will be reset to prevent them hanging in a bad state.
-     */
-    uint32_t resetAfterInactivitySeconds;
 };
 
 struct CryptoAuth_Session
@@ -55,6 +49,12 @@ struct CryptoAuth_Session
      * any packet avertizing a key which doesn't hash to this will be dropped.
      */
     uint8_t herIp6[16];
+
+    /**
+     * After this number of seconds of inactivity,
+     * a connection will be reset to prevent them hanging in a bad state.
+     */
+    uint32_t resetAfterInactivitySeconds;
 };
 
 /**
@@ -144,8 +144,56 @@ struct CryptoAuth_Session* CryptoAuth_newSession(struct CryptoAuth* ca,
 /** @return 0 on success, -1 otherwise. */
 int CryptoAuth_encrypt(struct CryptoAuth_Session* session, struct Message* msg);
 
-/** @return 0 on success, -1 otherwise. */
-int CryptoAuth_decrypt(struct CryptoAuth_Session* session, struct Message* msg);
+enum CryptoAuth_DecryptErr {
+    CryptoAuth_DecryptErr_NONE = 0,
+
+    // Packet too short
+    CryptoAuth_DecryptErr_RUNT = 1,
+
+    // Received a run message to an un-setup session
+    CryptoAuth_DecryptErr_NO_SESSION = 2,
+
+    CryptoAuth_DecryptErr_FINAL_SHAKE_FAIL = 3,
+
+    CryptoAuth_DecryptErr_FAILED_DECRYPT_RUN_MSG = 4,
+
+    CryptoAuth_DecryptErr_KEY_PKT_ESTABLISHED_SESSION = 5,
+
+    CryptoAuth_DecryptErr_WRONG_PERM_PUBKEY = 6,
+
+    // Only specific IPv6 can connect to this CA session and the request has the wrong one.
+    CryptoAuth_DecryptErr_IP_RESTRICTED = 7,
+
+    // Authentication is required and is missing.
+    CryptoAuth_DecryptErr_AUTH_REQUIRED = 8,
+
+    // Basically this means the login name doesn't exist, beware of giving this information up.
+    CryptoAuth_DecryptErr_UNRECOGNIZED_AUTH = 9,
+
+    // Key packet and we are not in a state to accept a key packet
+    CryptoAuth_DecryptErr_STRAY_KEY = 10,
+
+    CryptoAuth_DecryptErr_HANDSHAKE_DECRYPT_FAILED = 11,
+
+    // Set zero as the temporary public key
+    CryptoAuth_DecryptErr_WISEGUY = 12,
+
+    // Duplicate hello or key packet (same temp key and not a repeat-packet type)
+    // Or repeat key packet with different key than what is known
+    // Or a repeat hello packet for which we already know the temp key (meaning it is associated
+    // with an existing session) when we are not in a state to accept a repeat hello.
+    CryptoAuth_DecryptErr_INVALID_PACKET = 13,
+
+    // Replay checker could not validate this packet
+    CryptoAuth_DecryptErr_REPLAY = 14,
+
+    // Authenticated decryption failed
+    CryptoAuth_DecryptErr_DECRYPT = 15
+};
+
+// returns 0 if everything if ok, otherwise an encryption error.
+// If there is an error, the content of the message MIGHT already be decrypted !
+enum CryptoAuth_DecryptErr CryptoAuth_decrypt(struct CryptoAuth_Session* sess, struct Message* msg);
 
 /**
  * Choose the authentication credentials to use.
@@ -169,45 +217,40 @@ void CryptoAuth_resetIfTimeout(struct CryptoAuth_Session* session);
 
 void CryptoAuth_reset(struct CryptoAuth_Session* caSession);
 
-/** New CryptoAuth session, has not sent or received anything. */
-#define CryptoAuth_NEW         0
+enum CryptoAuth_State {
+    // New CryptoAuth session, has not sent or received anything
+    CryptoAuth_State_INIT = 0,
 
-/** Sent a hello message, waiting for reply. */
-#define CryptoAuth_HANDSHAKE1  1
+    // Sent a hello message, waiting for reply
+    CryptoAuth_State_SENT_HELLO = 1,
 
-/** Received a hello message, sent a key message, waiting for the session to complete. */
-#define CryptoAuth_HANDSHAKE2  2
+    // Received a hello message, have not yet sent a reply
+    CryptoAuth_State_RECEIVED_HELLO = 2,
 
-/** Sent a hello message and received a key message but have not gotten a data message yet. */
-#define CryptoAuth_HANDSHAKE3  3
+    // Received a hello message, sent a key message, waiting for the session to complete
+    CryptoAuth_State_SENT_KEY = 3,
 
-/** The CryptoAuth session has successfully done a handshake and received at least one message. */
-#define CryptoAuth_ESTABLISHED 4
+    // Sent a hello message, received a key message, may or may not have sent some data traffic
+    // but no data traffic has yet been received
+    CryptoAuth_State_RECEIVED_KEY = 4,
 
-/** The number of states */
-#define CryptoAuth_STATE_COUNT 5
+    // Received data traffic, session is in run state
+    CryptoAuth_State_ESTABLISHED = 100
+};
 
 static inline char* CryptoAuth_stateString(int state)
 {
     switch (state) {
-        case CryptoAuth_NEW:         return "CryptoAuth_NEW";
-        case CryptoAuth_HANDSHAKE1:  return "CryptoAuth_HANDSHAKE1";
-        case CryptoAuth_HANDSHAKE2:  return "CryptoAuth_HANDSHAKE2";
-        case CryptoAuth_HANDSHAKE3:  return "CryptoAuth_HANDSHAKE3";
-        case CryptoAuth_ESTABLISHED: return "CryptoAuth_ESTABLISHED";
+        case CryptoAuth_State_INIT:           return "INIT";
+        case CryptoAuth_State_SENT_HELLO:     return "SENT_HELLO";
+        case CryptoAuth_State_RECEIVED_HELLO: return "RECEIVED_HELLO";
+        case CryptoAuth_State_SENT_KEY:       return "SENT_KEY";
+        case CryptoAuth_State_RECEIVED_KEY:   return "RECEIVED_KEY";
+        case CryptoAuth_State_ESTABLISHED:    return "ESTABLISHED";
         default: return "INVALID";
     }
 }
 
-/**
- * Get the state of the CryptoAuth session.
- *
- * @param interface a CryptoAuth wrapper.
- * @return one of CryptoAuth_NEW,
- *                CryptoAuth_HANDSHAKE1,
- *                CryptoAuth_HANDSHAKE2 or
- *                CryptoAuth_ESTABLISHED
- */
-int CryptoAuth_getState(struct CryptoAuth_Session* session);
+enum CryptoAuth_State CryptoAuth_getState(struct CryptoAuth_Session* session);
 
 #endif

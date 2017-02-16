@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include "dht/Address.h"
 #include "interface/Iface.h"
@@ -165,16 +165,34 @@ static Iface_DEFUN incomingFromIpTunnelIf(struct Message* msg, struct Iface* ipT
     return toSessionManagerIf(msg, ud);
 }
 
+static Iface_DEFUN incomingFromControlHandlerIf(struct Message* msg, struct Iface* iface)
+{
+    struct UpperDistributor_pvt* ud =
+        Identity_containerOf(iface, struct UpperDistributor_pvt, pub.controlHandlerIf);
+    Assert_true(msg->length >= RouteHeader_SIZE);
+    struct RouteHeader* hdr = (struct RouteHeader*) msg->bytes;
+    Assert_true(hdr->flags & RouteHeader_flags_CTRLMSG);
+    Assert_true(!(hdr->flags & RouteHeader_flags_INCOMING));
+    sendToHandlers(msg, ContentType_CTRL, ud);
+    return Iface_next(&ud->pub.sessionManagerIf, msg);
+}
+
 static Iface_DEFUN incomingFromSessionManagerIf(struct Message* msg, struct Iface* sessionManagerIf)
 {
     struct UpperDistributor_pvt* ud =
         Identity_containerOf(sessionManagerIf, struct UpperDistributor_pvt, pub.sessionManagerIf);
-    Assert_true(msg->length >= RouteHeader_SIZE + DataHeader_SIZE);
+    Assert_true(msg->length >= RouteHeader_SIZE);
     struct RouteHeader* hdr = (struct RouteHeader*) msg->bytes;
+    if (hdr->flags & RouteHeader_flags_CTRLMSG) {
+        sendToHandlers(msg, ContentType_CTRL, ud);
+        return Iface_next(&ud->pub.controlHandlerIf, msg);
+    }
+    Assert_true(msg->length >= RouteHeader_SIZE + DataHeader_SIZE);
+
     struct DataHeader* dh = (struct DataHeader*) &hdr[1];
     enum ContentType type = DataHeader_getContentType(dh);
     sendToHandlers(msg, type, ud);
-    if (type <= ContentType_IP6_RAW) {
+    if (type <= ContentType_IP6_MAX) {
         return Iface_next(&ud->pub.tunAdapterIf, msg);
     }
     if (type == ContentType_CJDHT) {
@@ -255,6 +273,7 @@ struct UpperDistributor* UpperDistributor_new(struct Allocator* allocator,
     out->pub.tunAdapterIf.send = incomingFromTunAdapterIf;
     out->pub.ipTunnelIf.send = incomingFromIpTunnelIf;
     out->pub.sessionManagerIf.send = incomingFromSessionManagerIf;
+    out->pub.controlHandlerIf.send = incomingFromControlHandlerIf;
     out->log = log;
     out->alloc = alloc;
     out->myAddress = myAddress;

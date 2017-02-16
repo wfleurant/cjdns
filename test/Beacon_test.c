@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #ifdef SUBNODE
 // TODO(cjd): Subnode beacon testing
@@ -113,12 +113,12 @@ static void checkLinkage(void* vTwoNodes)
     }
 
 
-    if (Pathfinder_getNodeStore(ctx->nodeA->pathfinder)->nodeCount < 1) {
+    if (Pathfinder_getNodeStore(ctx->nodeA->pathfinder)->nodeCount < 2) {
         notLinkedYet(ctx);
         return;
     }
     Log_debug(ctx->logger, "A seems to be linked with B");
-    if (Pathfinder_getNodeStore(ctx->nodeB->pathfinder)->nodeCount < 1) {
+    if (Pathfinder_getNodeStore(ctx->nodeB->pathfinder)->nodeCount < 2) {
         notLinkedYet(ctx);
         return;
     }

@@ -1,13 +1,32 @@
 # cjdns
 
+<<<<<<< HEAD
+[English](README.md)
+=======
 [README.md](README.md)
+>>>>>>> c1b5f008b4140c207182e6ad318d97b72ee0974c
+[Русская версия](README_RU.md)
+[Hrvatski](README_HR.md)
+[Svenska](README_SV.md)
+[Ελληνικά](README_GR.md)
+<<<<<<< HEAD
+[Deutsch](README_DE.md)
+[繁體中文](README_ZHT.md)
+[Español](README_ES.md)
+=======
+>>>>>>> c1b5f008b4140c207182e6ad318d97b72ee0974c
 
 #### *Netzwerk neu erfunden*
 
 Cjdns implementiert ein verschlüsseltes IPv6 Netzwerk basierend auf Public-Key Kryptografie für die Adressen-Zuteilung und es benutzt eine verteilte Hash-Tabelle für das Routing.
 Dies ermöglicht eine nahezu konfigurationslose Handhabung und verhindert viele Sicherheits- und Skalierungs-Probleme, welche andere existierende Netzwerke heimsuchen.
 
+<<<<<<< HEAD
+[![Build Status](https://api.travis-ci.org/cjdelisle/cjdns.svg?branch=master)](https://travis-ci.org/cjdelisle/cjdns)
+=======
 [![Build Status](https://travis-ci.org/cjdelisle/cjdns.svg?branch=master)](https://travis-ci.org/cjdelisle/cjdns)
+[![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/387/badge)](https://bestpractices.coreinfrastructure.org/projects/387)
+>>>>>>> c1b5f008b4140c207182e6ad318d97b72ee0974c
 [![tip for next commit](https://tip4commit.com/projects/941.svg)](https://tip4commit.com/github/cjdelisle/cjdns)
 [![irc](https://img.shields.io/badge/irc%20chat-%23cjdns-blue.svg)](https://kiwiirc.com/client/irc.efnet.org/?nick=visitor|?#cjdns)
 
@@ -42,7 +61,6 @@ Dies ermöglicht eine nahezu konfigurationslose Handhabung und verhindert viele 
 
 * [irc://irc.efnet.org/#cjdns][IRC Web]
 * [Hyperboria][] das grösste cjdns-Netzwerk mit bis zu 2100 Knotenpunkten (Oktober 2015).
-* [Project Meshnet][]
 * [/r/darknetplan][]
 * [#cjdns auf Twitter][]
 
@@ -70,11 +88,11 @@ Diese Anleitungen sind für Debian-basierte Linux-Distributionen und OS X. Sie s
 
 ### 0. Installations-Abhängigkeiten
 
-Für beide Platformen ist es nicht zwingend notwendig, doch aber vorzuziehen, [Node.js](http://nodejs.org/) zu installieren. Wenn Node.js nicht verfügbar oder eine nicht akzeptierte Version ist, wird es in den Quellpfad heruntergeladen und installiert.
+Für beide Platformen ist es nicht zwingend notwendig, doch aber vorzuziehen, [Node.js](https://nodejs.org/) zu installieren. Wenn Node.js nicht verfügbar oder eine nicht akzeptierte Version ist, wird es in den Quellpfad heruntergeladen und installiert.
 
 #### Debian-basierte distro:
 
-    sudo apt-get install nodejs git build-essential
+    sudo apt-get install nodejs git build-essential python2.7
 
 #### Fedora 22+ basierte distro:
 
@@ -107,7 +125,95 @@ Alles was du benötigst ist als Prebuild im FreeBSD' port bereits vorhanden.
 
     pkg install gmake node
 
-### 1. Retrieve cjdns from GitHub
+#### Arch:
+
+Du kannst cjdns mit folgendem Befehl installieren.
+
+    pacman -S cjdns
+
+Wenn du aus den Quellen installieren möchtest, kann alles, was du brauchst hiermit installiert werden.
+
+    pacman -S nodejs git base-devel
+
+Alternativ kannst du per AUR das Packet `cjdns-git` installieren.
+Nach der Installation ist die Konfigurationsdatei unter  `/etc/cjdroute.conf` zu finden.
+Um den Service `cjdns.service` zu starten, führe
+
+        systemctl start cjdns
+
+ aus.
+ Um ihn zu stoppen:
+
+       systemctl stop cjdns
+
+#### Gentoo:
+
+cjdns ist noch nicht im Gentoo Repository, daher muss ein Overlay verwendet werden.
+Der einfachste Weg ist Layman zu verwenden, aber man kann das auch händisch machen.
+
+##### Layman:
+
+Als erstes muss Layman installiert werden.
+
+    emerge layman
+
+Wenn Layman korrekt installiert ist, kann man das Overlay hinzufügen.
+
+    layman -f
+    layman -a weuxel
+
+In Zukunft kann man folgenden Befehl verwenden um das Overlay zu syncen.
+
+    layman -S
+
+Jetzt kann cjdns installiert werden.
+
+    emerge cjdns
+
+##### Händische Installation:
+
+Zuerst muss das Overlay Repository geklont werden.
+
+    cd /opt
+    git clone https://github.com/Weuxel/portage-weuxel.git
+
+Nun bringen wir Portage dazu das Repo zu verwenden.
+
+    cd /etc/portage/repos.conf/
+
+Erstelle eine Datei `portage-weuxel.conf` mit folgendem Inhalt:
+
+    [weuxel]
+    location = /opt/portage-weuxel
+    masters = gentoo
+    auto-sync = yes
+
+Einmal syncen.
+
+    emerge --sync
+
+Und cjdns installieren.
+
+    emerge cjdns
+
+#### Automatische Crash Erkennung und neu starten
+
+Kopiere das OpenRC Init Skript aus `contrib/openrc` nach `/etc/init.d/` und ändere die Variablen `CONFFILE` und `command` nach Bedarf.
+Nun starte cjdns mit dem Kommando
+
+   /etc/init.d/cjdns start
+
+Konfigiere das Initsystem cjdns automatisch zu starten
+
+   rc-update add cjdns default
+
+Kopiere das service_restart Skript `contrib/gentoo/service_restart.sh` an eine beliebige, geeignete Stelle im Verzeichnisbaum deines Systems und ändere die eMailadresse. Wenn du keine eMail erhalten willst, wenn der Service neu gestartet wurde, dann kommentiere die komplette Zeile aus.
+Nun füge folgenden crontab Eintrag hinzu
+
+   # Restart crashed Services
+   * * * * *       root	/path/to/script/service_restart.sh
+
+### 1. Hole cjdns from GitHub
 
 Klone das Repository von GitHub und wechsle zum Quellverzeichnis:
 
@@ -118,7 +224,7 @@ Klone das Repository von GitHub und wechsle zum Quellverzeichnis:
 
     ./do
 
-Es sollte folgendes stehen: `Build completed successfully, type ./cjdroute to begin setup.`. Danach gehe vor wie weiter unten beschriebe:
+Es sollte folgendes stehen: `Build completed successfully, type ./cjdroute to begin setup.`. Danach gehe vor wie weiter unten beschrieben:
 
 --------------------------------------------------------------------------------
 
@@ -151,10 +257,10 @@ Wenn es sagt: `cat: /dev/net/tun: Permission denied` Dann verwendest du vielleic
 
 **Schütze dein conf File!**
 
-Ein verlorenes conf File bedeutet, du hast dein Passwort und deine Verbindungen verloren und jeder der sich mit dir verbunden hatte wird nicht länger in der lage sein sich mit dir zu verbinden.
+Ein verlorenes conf File bedeutet, du hast dein Passwort und deine Verbindungen verloren und jeder der sich mit dir verbunden hatte wird nicht länger in der lage sein, sich mit dir zu verbinden.
 Ein kompromitiertes conf File bedeutet, dass andere Leute sich mit deiner Identität im Netzwerk ausgeben können.
 
-Um ein conf File mit den richtigen Erlaubnissen zu generieren, so dass nur dein User darauf schreiben und lesen kann:
+Um ein conf File mit den richtigen Rechten zu generieren, so dass nur dein User darauf schreiben und lesen kann:
 
     (umask 077 && ./cjdroute --genconf > cjdroute.conf)
 
@@ -220,15 +326,15 @@ In deinem config File wirst du eine Passage wie folgt finden:
 "authorizedPasswords":
 [
     // A unique string which is known to the client and server.
-    {"password": "thisisauniquestring_001"}
+    {"password": "password001", "login": "default-login"}
 
     // More passwords should look like this.
-    // {"password": "thisisauniquestring_002"}
-    // {"password": "thisisauniquestring_003"}
-    // {"password": "thisisauniquestring_004"}
+    // {"password": "password002", "login": "my-second-peer"}
+    // {"password": "password003", "login": "my-third-peer}
+    // {"password": "password004", "login": "my-fourth-peer"}
     ...
 
-    // "your.external.ip.goes.here:45678":{"password": "thisisauniquestring_001","publicKey":thisisauniqueKEY_001.k"}
+    // "your.external.ip.goes.here:45678":{"login": "default-login", "password": "password001","publicKey":thisisauniqueKEY_001.k"}
 
 ],
 ```
@@ -310,7 +416,7 @@ Wenn du Probleme hast, benutze `killall cjdroute` um tabula rasa zu machen. Benu
 Die obigen Anleitungen starten cjdns als root-user. Es kann also dein System konfigurieren ohne dich um erlaubniss zu bitten. Um cjdns als non-root-user zu starten, konsultiere [doc/non-root-user.md](doc/non-root-user.md).
 
 
-### 6. Komme zu IRC
+### 6. Komme ins IRC
 
 Willkommen im Netzwerk! Du bist jetzt ein Netzwerk-Administrator. Damit verbunden ist eine gewisse Verantwortung, die unter anderem darin bestehen erreichbar zu sein im Falle eines Problems mit deinen Gerätschaften. Du solltest dich auf [IRC](#community) aufhalten, so dass leute dich erreichen können.
 
@@ -325,13 +431,29 @@ Du kannst das admin-API wie folgt erreichen:
 * die **Python library**; konsultiere [here](contrib/python/README.md).
 * die **Perl library**, unterhalten by Mikey; konsultiere [here](contrib/perl/CJDNS/README).
 
+## Fehler melden
+1. Machs nicht
+2. Geh ins IRC und sprich mit jemandem.
+3. Was passieren wird ist entweder
+ * Jemand hat Lust es zu fixen
+ * Du hast Lust es zu fixen
+ * Es interessiert niemanden und es wird für eine Weile vergessen und eventuell wird jemand später darauf stossen und es fixen oder es geht im Refactoring verloren.
+ * Niemand kann es im Moment beheben, aber es wird als merkenswert angesehen, weil es eine große Bedeutung in der Entwicklung des Quelltextes hat. In diesem Fall muss es technisch erklärt werden von jemandem, der den Quelltext sehr gut kennt. Derjenige wird einen Pullrequest in das docs/bugs Verzeichnis machen.
+ 4. Alternativ kannst du das Problem im Repo https://github.com/hyperboria/cjdns.git melden.
+
+### Sicherheit
+Sicherheitsprobleme sollten im IRC berichtet werden, genau wie andere Fehler. Wir haben keine geschlossene Gruppe von Leuten mit Spezialwissen, das Bedeutet, das Standardvorgehen für Sicherheitsmeldungen ist volle Enthüllung.
+Schaue unter  https://github.com/cjdelisle/cjdns/blob/master/doc/security_specification.md nach, ob ein Sicherheitsproblem wirklich ein Sicherheitsproblem ist.
+
+
+## Problem melden
+1. Du kannst ein Problem hier melden https://github.com/hyperboria/bugs/issues
 
 [IRC Web]: http://chat.efnet.org/irc.cgi?chan=%23cjdns
-[Hyperboria]: http://hyperboria.net
-[Project Meshnet]: https://projectmeshnet.org
-[/r/darknetplan]: http://www.reddit.com/r/darknetplan
+[Hyperboria]: https://hyperboria.net
+[/r/darknetplan]: https://www.reddit.com/r/darknetplan
 [#cjdns auf Twitter]: https://twitter.com/hashtag/cjdns
-[Hyperboria-Karte]: http://www.fc00.org/
+[Hyperboria-Karte]: https://www.fc00.org/
 [Buildbots]: https://buildbot.meshwith.me/cjdns/waterfall
 
 [Cjdns auf Wikipedia]: https://en.wikipedia.org/wiki/Cjdns
@@ -340,5 +462,5 @@ Du kannst das admin-API wie folgt erreichen:
 [Kademlia]: https://en.wikipedia.org/wiki/Kademlia
 
 [Tor]: https://www.torproject.org
-[I2P]: http://www.i2p2.de
+[I2P]: https://geti2p.net/en/
 [Freenet]: https://freenetproject.org
