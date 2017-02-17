@@ -45,6 +45,8 @@
 #include "wire/DataHeader.h"
 #include "util/CString.h"
 
+#include "subnode/ReachabilityAnnouncer.h"
+
 ///////////////////// [ Address ][ content... ]
 
 
@@ -348,14 +350,10 @@ static Iface_DEFUN searchReq(struct Message* msg, struct SubnodePathfinder_pvt* 
         return NULL;
     }
 
-    if (!pf->pub.snh || !pf->pub.snh->snodes->length) { return NULL; }
+    if (!pf->pub.snh || !pf->pub.snh->snodeAddr.path) { return NULL; }
 
-    for (int i = 0; i < pf->pub.snh->snodes->length; i++) {
-        struct Address* sn = AddrSet_get(pf->pub.snh->snodes, i);
-        Log_debug(pf->log, "Compare to supernode [%s]", Address_toString(sn, msg->alloc)->bytes);
-        if (!Bits_memcmp(sn->ip6.bytes, addr, 16)) {
-            return sendNode(msg, sn, 0xfffffff0, pf);
-        }
+    if (!Bits_memcmp(pf->pub.snh->snodeAddr.ip6.bytes, addr, 16)) {
+        return sendNode(msg, &pf->pub.snh->snodeAddr, 0xfffffff0, pf);
     }
 
     struct MsgCore_Promise* qp = MsgCore_createQuery(pf->msgCore, 0, pf->alloc);
@@ -364,8 +362,7 @@ static Iface_DEFUN searchReq(struct Message* msg, struct SubnodePathfinder_pvt* 
     qp->cb = getRouteReply;
     qp->userData = pf;
 
-    //TODO(cjd): get a *working* snode
-    qp->target = AddrSet_get(pf->pub.snh->snodes, 0);
+    qp->target = &pf->pub.snh->snodeAddr;
 
     Log_debug(pf->log, "\n\n--Sending getRoute to snode %s--\n\n",
         Address_toString(qp->target, qp->alloc)->bytes);
@@ -415,6 +412,8 @@ static Iface_DEFUN peer(struct Message* msg, struct SubnodePathfinder_pvt* pf)
 
     NodeCache_discoverNode(pf->nc, &addr);
 
+    ReachabilityCollector_change(pf->rc, &addr);
+
     return sendNode(msg, &addr, 0xffffff00, pf);
 }
 
@@ -433,6 +432,11 @@ static Iface_DEFUN peerGone(struct Message* msg, struct SubnodePathfinder_pvt* p
     }
 
     NodeCache_forgetNode(pf->nc, &addr);
+
+    struct Address zaddr;
+    Bits_memcpy(&zaddr, &addr, Address_SIZE);
+    zaddr.path = 0;
+    ReachabilityCollector_change(pf->rc, &zaddr);
 
     // We notify about the node but with max metric so it will be removed soon.
     return sendNode(msg, &addr, 0xffffffff, pf);
@@ -596,6 +600,7 @@ struct SubnodePathfinder* SubnodePathfinder_new(struct Allocator* allocator,
     pf->myPeers = AddrSet_new(alloc);
     pf->pub.eventIf.send = incomingFromEventIf;
     pf->msgCoreIf.send = incomingFromMsgCore;
+    pf->privateKey = privateKey;
 
     pf->myScheme = myScheme;
     pf->br = BoilerplateResponder_new(myScheme, alloc);
