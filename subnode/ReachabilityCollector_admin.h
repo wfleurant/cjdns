@@ -12,30 +12,16 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#ifndef AddrSet_H
-#define AddrSet_H
+#ifndef ReachabilityCollector_admin_H
+#define ReachabilityCollector_admin_H
 
-#include "memory/Allocator.h"
-#include "dht/Address.h"
+#include "admin/Admin.h"
+#include "subnode/ReachabilityCollector.h"
 #include "util/Linker.h"
-Linker_require("subnode/AddrSet.c");
+Linker_require("subnode/ReachabilityCollector_admin.c");
 
-struct AddrSet
-{
-    int length;
-};
-
-// only accounts for the key, not the label.
-int AddrSet_indexOf(struct AddrSet* as, struct Address* addr);
-
-void AddrSet_add(struct AddrSet* as, struct Address* addr);
-
-void AddrSet_remove(struct AddrSet* as, struct Address* addr);
-
-struct Address* AddrSet_get(struct AddrSet* as, int i);
-
-struct AddrSet* AddrSet_new(struct Allocator* alloc);
-
-void AddrSet_flush(struct AddrSet* as);
+void ReachabilityCollector_admin_register(struct ReachabilityCollector* rc,
+                                          struct Admin* admin,
+                                          struct Allocator* alloc);
 
 #endif

@@ -47,6 +47,15 @@ struct PFChan_Msg
 Assert_compileTime(sizeof(struct PFChan_Msg) == PFChan_Msg_MIN_SIZE);
 #pragma GCC poison PFChan_Msg_SIZE
 
+struct PFChan_CtrlMsg
+{
+    struct RouteHeader route;
+    struct Control_Header ctrlHdr;
+};
+#define PFChan_CtrlMsg_MIN_SIZE (RouteHeader_SIZE + Control_Header_SIZE)
+Assert_compileTime(sizeof(struct PFChan_Msg) == PFChan_CtrlMsg_MIN_SIZE);
+#pragma GCC poison PFChan_CtrlMsg_SIZE
+
 struct PFChan_Ping
 {
     uint64_t cookie;
@@ -150,7 +159,21 @@ enum PFChan_Pathfinder
      */
     PFChan_Pathfinder_PATHFINDERS = 520,
 
-    PFChan_Pathfinder__TOO_HIGH = 521,
+    /**
+     * Send from the Pathfinder in order to send off a CTRL message.
+     * Send under this, a RouteHeader and the control frame after it.
+     * (Received by: UpperDistributor.c)
+     */
+    PFChan_Pathfinder_CTRL_SENDMSG = 521,
+
+    /**
+     * You must send this whenever you have adopted a supernode.
+     * Send with address set to all zeros if you lost your supernode.
+     * (Received by: ControlHandler.c)
+     */
+    PFChan_Pathfinder_SNODE = 522,
+
+    PFChan_Pathfinder__TOO_HIGH = 523,
 };
 
 struct PFChan_FromPathfinder
@@ -260,7 +283,20 @@ enum PFChan_Core
      */
     PFChan_Core_PONG = 1036,
 
-    PFChan_Core__TOO_HIGH = 1037,
+    /**
+     * Will be emitted by the core when a control message (response) is incoming.
+     * TODO(cjd): This doesn't cover all control message types yet.
+     */
+    PFChan_Core_CTRL_MSG = 1037,
+
+    /**
+     * Will be emitted when the core has a path to a node but the session is not setup.
+     * Structure is a PFChan_Node
+     * (emitted by: SessionManager.c)
+     */
+    PFChan_Core_UNSETUP_SESSION = 1038,
+
+    PFChan_Core__TOO_HIGH = 1039,
 };
 
 struct PFChan_Core_SearchReq
