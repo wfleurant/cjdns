@@ -121,7 +121,7 @@ The cjdns developers.
 
 ## How to install cjdns
 
-These instructions are for Debian-based Linux distributions and OS X. They should be
+These instructions are for Debian-based Linux distributions and macOS. They should be
 informative enough for use on other distributions - just don't expect them to
 work verbatim. If you want to know what [operating system's base is go here](https://upload.wikimedia.org/wikipedia/commons/1/1b/Linux_Distribution_Timeline.svg).
 
@@ -161,11 +161,15 @@ The resume service restarts cjdns when the system wakes up from sleep.
 
     emerge --ask nodejs sys-devel/gcc dev-lang/python:3.4 dev-vcs/git
 
-#### OS X:
+#### macOS:
 
-Install with homebrew:
+Install with [Homebrew](https://brew.sh/):
 
     brew install cjdns
+
+Install with [MacPorts](https://www.macports.org/):
+
+    sudo port install cjdns
 
 #### OpenBSD:
 
@@ -262,7 +266,7 @@ Configure the init system to autostart cjdns
 
 Copy the service_restart script `contrib/gentoo/service_restart.sh` to any convenient directory on
 your system and modify the eMail address. If you do not wish to be notified, comment out the whole line.
-Now add an crontab entry like this
+Now add a crontab entry like this
 
    # Restart crashed Services
    * * * * *       root	/path/to/script/service_restart.sh
@@ -301,7 +305,7 @@ Run cjdroute without options for HELP:
 
 ### 0. Make sure you've got the stuff.
 
-If you're on OS X, don't worry about this step.
+If you're on macOS, don't worry about this step.
 
     LANG=C cat /dev/net/tun
 
@@ -477,7 +481,7 @@ including how to peer with other cjdns nodes over ethernet and wifi.
 Once your node is running, you're now a newly minted IPv6 host. Your operating
 system may automatically reconfigure network services to use this new address.
 If this is not what you intend, you should check to see that you are not
-offering more services then you intended to. ;)
+offering more services than you intended to. ;)
 
 See [doc/network-services.md](doc/network-services.md) for instructions.
 

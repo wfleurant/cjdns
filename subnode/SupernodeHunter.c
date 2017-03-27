@@ -194,7 +194,9 @@ static void peerResponseOK(struct SwitchPinger_Response* resp, struct SupernodeH
     struct Address snode;
     Bits_memcpy(&snode, &resp->snode, sizeof(struct Address));
     if (!snode.path) {
-        Log_debug(snp->log, "Peer reports no supernode");
+        uint8_t label[20];
+        AddrTools_printPath(label, resp->label);
+        Log_debug(snp->log, "Peer [%s] reports no supernode", label);
         return;
     }
     snode.path = LabelSplicer_splice(snode.path, resp->label);
@@ -260,7 +262,7 @@ static void probePeerCycle(void* vsn)
     if (snp->pub.snodeIsReachable && !snp->authorizedSnodes->length) { return; }
     if (!snp->peers->length) { return; }
 
-    Log_debug(snp->log, "\n\nping cycle\n\n");
+    //Log_debug(snp->log, "probePeerCycle()");
 
     if (AddrSet_indexOf(snp->authorizedSnodes, snp->myAddress) != -1) {
         Log_info(snp->log, "Self is specified as supernode, pinging...");

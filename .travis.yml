@@ -4,9 +4,6 @@ branches:
   only:
     - crashey
     - master
-    - stable-0.4
-    - stable-0.5
-    - stable-0.6
 
 compiler:
   - gcc
@@ -18,4 +15,5 @@ script:
   - "uname -a"
   - "bash node_build/run_jshint"
   - "./do"
+  - "SUBNODE=1 ./do"
   - "./android_do"
