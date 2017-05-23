@@ -25,9 +25,6 @@ struct AddrSet
     int length;
 };
 
-// only accounts for the key, not the label.
-int AddrSet_indexOf(struct AddrSet* as, struct Address* addr);
-
 void AddrSet_add(struct AddrSet* as, struct Address* addr);
 
 void AddrSet_remove(struct AddrSet* as, struct Address* addr);

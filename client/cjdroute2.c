@@ -255,11 +255,6 @@ static int genconf(struct Random* rand, bool eth)
            "    // Configuration for the router.\n"
            "    \"router\":\n"
            "    {\n"
-           "        // supernodes, if none are specified they'll be taken from your peers\n"
-           "        \"supernodes\": [\n"
-           "            //\"6743gf5tw80ExampleExampleExampleExamplevlyb23zfnuzv0.k\",\n"
-           "        ]\n"
-           "\n"
            "        // The interface which is used for connecting to the cjdns network.\n"
            "        \"interface\":\n"
            "        {\n"
@@ -630,9 +625,9 @@ int main(int argc, char** argv)
     struct Log* logger = FileWriterLog_new(stdout, allocator);
 
     // --------------------- Get Admin  --------------------- //
-    Dict* configAdmin = Dict_getDictC(&config, "admin");
-    String* adminPass = Dict_getStringC(configAdmin, "password");
-    String* adminBind = Dict_getStringC(configAdmin, "bind");
+    Dict* configAdmin = Dict_getDict(&config, String_CONST("admin"));
+    String* adminPass = Dict_getString(configAdmin, String_CONST("password"));
+    String* adminBind = Dict_getString(configAdmin, String_CONST("bind"));
     if (!adminPass) {
         adminPass = String_newBinary(NULL, 32, allocator);
         Random_base32(rand, (uint8_t*) adminPass->bytes, 32);
@@ -655,7 +650,7 @@ int main(int argc, char** argv)
     struct Allocator* corePipeAlloc = Allocator_child(allocator);
     char corePipeName[64] = "client-core-";
     Random_base32(rand, (uint8_t*)corePipeName+CString_strlen(corePipeName), 31);
-    String* pipePath = Dict_getStringC(&config, "pipe");
+    String* pipePath = Dict_getString(&config, String_CONST("pipe"));
     if (!pipePath) {
         pipePath = String_CONST(Pipe_PATH);
     }
@@ -671,7 +666,7 @@ int main(int argc, char** argv)
     char* args[] = { "core", pipePath->bytes, corePipeName, NULL };
 
     // --------------------- Spawn Angel --------------------- //
-    String* privateKey = Dict_getStringC(&config, "privateKey");
+    String* privateKey = Dict_getString(&config, String_CONST("privateKey"));
 
     char* corePath = Process_getPath(allocator);
 
@@ -688,13 +683,13 @@ int main(int argc, char** argv)
     // --------------------- Pre-Configure Core ------------------------- //
     Dict* preConf = Dict_new(allocator);
     Dict* adminPreConf = Dict_new(allocator);
-    Dict_putDictC(preConf, "admin", adminPreConf, allocator);
-    Dict_putStringC(preConf, "privateKey", privateKey, allocator);
-    Dict_putStringC(adminPreConf, "bind", adminBind, allocator);
-    Dict_putStringC(adminPreConf, "pass", adminPass, allocator);
-    Dict* logging = Dict_getDictC(&config, "logging");
+    Dict_putDict(preConf, String_CONST("admin"), adminPreConf, allocator);
+    Dict_putString(preConf, String_CONST("privateKey"), privateKey, allocator);
+    Dict_putString(adminPreConf, String_CONST("bind"), adminBind, allocator);
+    Dict_putString(adminPreConf, String_CONST("pass"), adminPass, allocator);
+    Dict* logging = Dict_getDict(&config, String_CONST("logging"));
     if (logging) {
-        Dict_putDictC(preConf, "logging", logging, allocator);
+        Dict_putDict(preConf, String_CONST("logging"), logging, allocator);
     }
 
     struct Message* toCoreMsg = Message_new(0, 1024, allocator);
@@ -714,8 +709,8 @@ int main(int argc, char** argv)
     corePipe = NULL;
 
     // --------------------- Get Admin Addr/Port/Passwd --------------------- //
-    Dict* responseFromCoreAdmin = Dict_getDictC(responseFromCore, "admin");
-    adminBind = Dict_getStringC(responseFromCoreAdmin, "bind");
+    Dict* responseFromCoreAdmin = Dict_getDict(responseFromCore, String_CONST("admin"));
+    adminBind = Dict_getString(responseFromCoreAdmin, String_CONST("bind"));
 
     if (!adminBind) {
         Except_throw(eh, "didn't get address and port back from core");
@@ -738,7 +733,7 @@ int main(int argc, char** argv)
 
     // --------------------- noBackground ------------------------ //
 
-    int64_t* noBackground = Dict_getIntC(&config, "noBackground");
+    int64_t* noBackground = Dict_getInt(&config, String_CONST("noBackground"));
     if (forceNoBackground || (noBackground && *noBackground)) {
         Log_debug(logger, "Keeping cjdns client alive because %s",
             (forceNoBackground) ? "--nobg was specified on the command line"

@@ -38,7 +38,7 @@ static void getHandles(Dict* args, void* vcontext, String* txid, struct Allocato
     struct Context* context = Identity_check((struct Context*) vcontext);
     struct Allocator* alloc = Allocator_child(context->alloc);
 
-    int64_t* page = Dict_getIntC(args, "page");
+    int64_t* page = Dict_getInt(args, String_CONST("page"));
     int i = (page) ? *page * ENTRIES_PER_PAGE : 0;
     struct SessionManager_HandleList* hList = SessionManager_getHandleList(context->sm, alloc);
 
@@ -48,11 +48,12 @@ static void getHandles(Dict* args, void* vcontext, String* txid, struct Allocato
     }
 
     Dict* r = Dict_new(alloc);
-    Dict_putListC(r, "handles", list, alloc);
-    Dict_putIntC(r, "total", hList->length, alloc);
+    Dict_putList(r, String_CONST("handles"), list, alloc);
+    Dict_putInt(r, String_CONST("total"), hList->length, alloc);
 
+    String* more = String_CONST("more");
     if (i < hList->length) {
-        Dict_putIntC(r, "more", 1, alloc);
+        Dict_putInt(r, more, 1, alloc);
     }
 
     Admin_sendMessage(r, txid, context->admin);
@@ -74,31 +75,35 @@ static void outputSession(struct Context* context,
 
     uint8_t printedAddr[40];
     AddrTools_printIp(printedAddr, session->caSession->herIp6);
-    Dict_putStringC(r, "ip6", String_new(printedAddr, alloc), alloc);
+    Dict_putString(r, String_CONST("ip6"), String_new(printedAddr, alloc), alloc);
 
     String* state =
         String_new(CryptoAuth_stateString(CryptoAuth_getState(session->caSession)), alloc);
-    Dict_putStringC(r, "state", state, alloc);
+    Dict_putString(r, String_CONST("state"), state, alloc);
 
     struct ReplayProtector* rp = &session->caSession->replayProtector;
-    Dict_putIntC(r, "duplicates", rp->duplicates, alloc);
-    Dict_putIntC(r, "lostPackets", rp->lostPackets, alloc);
-    Dict_putIntC(r, "receivedOutOfRange", rp->receivedOutOfRange, alloc);
+    Dict_putInt(r, String_CONST("duplicates"), rp->duplicates, alloc);
+    Dict_putInt(r, String_CONST("lostPackets"), rp->lostPackets, alloc);
+    Dict_putInt(r, String_CONST("receivedOutOfRange"), rp->receivedOutOfRange, alloc);
 
     struct Address addr;
     Bits_memcpy(addr.key, session->caSession->herPublicKey, 32);
     addr.path = session->sendSwitchLabel;
     addr.protocolVersion = session->version;
 
-    Dict_putStringC(r, "addr", Address_toString(&addr, alloc), alloc);
+    Dict_putString(r, String_CONST("addr"), Address_toString(&addr, alloc), alloc);
 
-    Dict_putIntC(r, "handle", session->receiveHandle, alloc);
-    Dict_putIntC(r, "sendHandle", session->sendHandle, alloc);
+    Dict_putString(r, String_CONST("publicKey"),
+                      Key_stringify(session->caSession->herPublicKey, alloc), alloc);
+    Dict_putInt(r, String_CONST("version"), session->version, alloc);
+    Dict_putInt(r, String_CONST("handle"), session->receiveHandle, alloc);
+    Dict_putInt(r, String_CONST("sendHandle"), session->sendHandle, alloc);
 
-    Dict_putIntC(r, "timeOfLastIn", session->timeOfLastIn, alloc);
-    Dict_putIntC(r, "timeOfLastOut", session->timeOfLastOut, alloc);
+    Dict_putInt(r, String_CONST("timeOfLastIn"), session->timeOfLastIn, alloc);
+    Dict_putInt(r, String_CONST("timeOfLastOut"), session->timeOfLastOut, alloc);
 
-    Dict_putIntC(r, "metric", session->metric, alloc);
+    Dict_putString(r, String_CONST("deprecation"),
+        String_CONST("publicKey,version will soon be removed"), alloc);
 
     Admin_sendMessage(r, txid, context->admin);
     return;
@@ -110,7 +115,7 @@ static void sessionStats(Dict* args,
                          struct Allocator* alloc)
 {
     struct Context* context = Identity_check((struct Context*) vcontext);
-    int64_t* handleP = Dict_getIntC(args, "handle");
+    int64_t* handleP = Dict_getInt(args, String_CONST("handle"));
     uint32_t handle = *handleP;
 
     struct SessionManager_Session* session = SessionManager_sessionForHandle(handle, context->sm);

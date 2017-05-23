@@ -17,24 +17,29 @@
 #include "util/log/Log.h"
 #include "util/Identity.h"
 #include "util/events/Timeout.h"
-#include "util/AddrTools.h"
 
 #define TIMEOUT_MILLISECONDS 10000
 
-struct PeerInfo_pvt
+struct PeerInfo
 {
-     struct ReachabilityCollector_PeerInfo pub;
+    // Address of the peer from us
+    struct Address addr;
+
+    // Their path to us
+    uint64_t pathThemToUs;
 
     // Next path to check when sending getPeers requests to our peer looking for ourselves.
     uint64_t pathToCheck;
+
+    bool querying;
 
     struct Allocator* alloc;
 
     Identity
 };
 
-#define ArrayList_NAME OfPeerInfo_pvt
-#define ArrayList_TYPE struct PeerInfo_pvt
+#define ArrayList_NAME OfPeerInfo
+#define ArrayList_TYPE struct PeerInfo
 #include "util/ArrayList.h"
 
 struct ReachabilityCollector_pvt
@@ -42,38 +47,34 @@ struct ReachabilityCollector_pvt
     struct ReachabilityCollector pub;
     struct MsgCore* msgCore;
     struct Allocator* alloc;
+    struct MsgCore_Promise* msgOnWire;
     struct Log* log;
     struct BoilerplateResponder* br;
     struct Address* myAddr;
 
-    struct ArrayList_OfPeerInfo_pvt* piList;
+    struct ArrayList_OfPeerInfo* piList;
 
     Identity
 };
-
-static void mkNextRequest(struct ReachabilityCollector_pvt* rcp);
 
 static void change0(struct ReachabilityCollector_pvt* rcp,
                     struct Address* nodeAddr,
                     struct Allocator* tempAlloc)
 {
     for (int i = 0; i < rcp->piList->length; i++) {
-        struct PeerInfo_pvt* pi = ArrayList_OfPeerInfo_pvt_get(rcp->piList, i);
-        if (Address_isSameIp(nodeAddr, &pi->pub.addr)) {
+        struct PeerInfo* pi = ArrayList_OfPeerInfo_get(rcp->piList, i);
+        if (Address_isSameIp(nodeAddr, &pi->addr)) {
             if (nodeAddr->path == 0) {
                 Log_debug(rcp->log, "Peer [%s] dropped",
-                    Address_toString(&pi->pub.addr, tempAlloc)->bytes);
-                ArrayList_OfPeerInfo_pvt_remove(rcp->piList, i);
+                    Address_toString(&pi->addr, tempAlloc)->bytes);
+                ArrayList_OfPeerInfo_remove(rcp->piList, i);
                 Allocator_free(pi->alloc);
-            } else if (nodeAddr->path != pi->pub.addr.path) {
+            } else if (nodeAddr->path != pi->addr.path) {
                 Log_debug(rcp->log, "Peer [%s] changed path",
-                    Address_toString(&pi->pub.addr, tempAlloc)->bytes);
-                pi->pub.pathThemToUs = -1;
+                    Address_toString(&pi->addr, tempAlloc)->bytes);
+                pi->pathThemToUs = 0;
                 pi->pathToCheck = 1;
-                pi->pub.querying = true;
-            }
-            if (rcp->pub.onChange) {
-                rcp->pub.onChange(&rcp->pub, nodeAddr->ip6.bytes, 0, 0, 0, 0xffff, 0xffff, 0xffff);
+                pi->querying = true;
             }
             return;
         }
@@ -84,16 +85,14 @@ static void change0(struct ReachabilityCollector_pvt* rcp,
         return;
     }
     struct Allocator* piAlloc = Allocator_child(rcp->alloc);
-    struct PeerInfo_pvt* pi = Allocator_calloc(piAlloc, sizeof(struct PeerInfo_pvt), 1);
+    struct PeerInfo* pi = Allocator_calloc(piAlloc, sizeof(struct PeerInfo), 1);
     Identity_set(pi);
-    Bits_memcpy(&pi->pub.addr, nodeAddr, Address_SIZE);
+    Bits_memcpy(&pi->addr, nodeAddr, Address_SIZE);
     pi->alloc = piAlloc;
-    pi->pub.querying = true;
+    pi->querying = true;
     pi->pathToCheck = 1;
-    pi->pub.pathThemToUs = -1;
-    ArrayList_OfPeerInfo_pvt_add(rcp->piList, pi);
-    Log_debug(rcp->log, "Peer [%s] added", Address_toString(&pi->pub.addr, tempAlloc)->bytes);
-    mkNextRequest(rcp);
+    ArrayList_OfPeerInfo_add(rcp->piList, pi);
+    Log_debug(rcp->log, "Peer [%s] added", Address_toString(&pi->addr, tempAlloc)->bytes);
 }
 
 void ReachabilityCollector_change(struct ReachabilityCollector* rc, struct Address* nodeAddr)
@@ -109,10 +108,13 @@ static void onReplyTimeout(struct MsgCore_Promise* prom)
     // meh do nothing, we'll just ping it again...
 }
 
+static void mkNextRequest(struct ReachabilityCollector_pvt* rcp);
+
 static void onReply(Dict* msg, struct Address* src, struct MsgCore_Promise* prom)
 {
     struct ReachabilityCollector_pvt* rcp =
         Identity_check((struct ReachabilityCollector_pvt*) prom->userData);
+    Assert_true(prom == rcp->msgOnWire);
     if (!src) {
         onReplyTimeout(prom);
         mkNextRequest(rcp);
@@ -121,10 +123,10 @@ static void onReply(Dict* msg, struct Address* src, struct MsgCore_Promise* prom
     struct Address_List* results = ReplySerializer_parse(src, msg, rcp->log, false, prom->alloc);
     uint64_t path = 1;
 
-    struct PeerInfo_pvt* pi = NULL;
+    struct PeerInfo* pi = NULL;
     for (int j = 0; j < rcp->piList->length; j++) {
-        struct PeerInfo_pvt* pi0 = ArrayList_OfPeerInfo_pvt_get(rcp->piList, j);
-        if (Address_isSameIp(&pi0->pub.addr, src)) {
+        struct PeerInfo* pi0 = ArrayList_OfPeerInfo_get(rcp->piList, j);
+        if (Address_isSameIp(&pi0->addr, src)) {
             pi = pi0;
             break;
         }
@@ -134,22 +136,19 @@ static void onReply(Dict* msg, struct Address* src, struct MsgCore_Promise* prom
         return;
     }
 
-    for (int i = results->length - 1; i >= 0; i--) {
+    for (int i = 0; i < results->length; i++) {
         path = results->elems[i].path;
-        Log_debug(rcp->log, "getPeers result [%s]",
-            Address_toString(&results->elems[i], prom->alloc)->bytes);
         if (Bits_memcmp(results->elems[i].ip6.bytes, rcp->myAddr->ip6.bytes, 16)) { continue; }
-        if (pi->pub.pathThemToUs != path) {
+        if (pi->pathThemToUs != path) {
             Log_debug(rcp->log, "Found back-route for [%s]",
                 Address_toString(src, prom->alloc)->bytes);
-            pi->pub.pathThemToUs = path;
             if (rcp->pub.onChange) {
                 rcp->pub.onChange(
                     &rcp->pub, src->ip6.bytes, path, src->path, 0, 0xffff, 0xffff, 0xffff);
             }
         }
-        pi->pub.querying = false;
-        mkNextRequest(rcp);
+        pi->pathThemToUs = path;
+        pi->querying = false;
         return;
     }
     pi->pathToCheck = (results->length < 8) ? 1 : path;
@@ -158,48 +157,29 @@ static void onReply(Dict* msg, struct Address* src, struct MsgCore_Promise* prom
 
 static void mkNextRequest(struct ReachabilityCollector_pvt* rcp)
 {
-    struct PeerInfo_pvt* pi = NULL;
+    struct PeerInfo* pi = NULL;
     for (int i = 0; i < rcp->piList->length; i++) {
-        pi = ArrayList_OfPeerInfo_pvt_get(rcp->piList, i);
-        if (pi->pub.querying) { break; }
+        pi = ArrayList_OfPeerInfo_get(rcp->piList, i);
+        if (!pi->querying) { continue; }
     }
-    if (!pi || !pi->pub.querying) {
-        Log_debug(rcp->log, "All [%u] peers have been queried", rcp->piList->length);
-        return;
-    }
-    struct MsgCore_Promise* query =
-        MsgCore_createQuery(rcp->msgCore, TIMEOUT_MILLISECONDS, rcp->alloc);
-    query->userData = rcp;
-    query->cb = onReply;
-    Assert_true(pi->pub.addr.ip6.bytes[0] == 0xfc);
-    query->target = Address_clone(&pi->pub.addr, query->alloc);
-    Dict* d = query->msg = Dict_new(query->alloc);
-    Dict_putStringCC(d, "q", "gp", query->alloc);
+    if (!pi || !pi->querying) { return; }
+    rcp->msgOnWire = MsgCore_createQuery(rcp->msgCore, TIMEOUT_MILLISECONDS, rcp->alloc);
+    rcp->msgOnWire->userData = rcp;
+    rcp->msgOnWire->cb = onReply;
+    rcp->msgOnWire->target = Address_clone(&pi->addr, rcp->msgOnWire->alloc);
+    Dict* d = rcp->msgOnWire->msg = Dict_new(rcp->msgOnWire->alloc);
+    Dict_putStringCC(d, "q", "gp", rcp->msgOnWire->alloc);
     uint64_t label_be = Endian_hostToBigEndian64(pi->pathToCheck);
-
-    uint8_t targetPath[20];
-    AddrTools_printPath(targetPath, pi->pathToCheck);
-    Log_debug(rcp->log, "Getting peers for peer [%s] tar [%s]",
-        Address_toString(&pi->pub.addr, query->alloc)->bytes,
-        targetPath);
-
     Dict_putStringC(d, "tar",
-        String_newBinary((uint8_t*) &label_be, 8, query->alloc), query->alloc);
-    BoilerplateResponder_addBoilerplate(rcp->br, d, &pi->pub.addr, query->alloc);
+        String_newBinary((uint8_t*) &label_be, 8, rcp->msgOnWire->alloc), rcp->msgOnWire->alloc);
+    BoilerplateResponder_addBoilerplate(rcp->br, d, &pi->addr, rcp->msgOnWire->alloc);
 }
 
 static void cycle(void* vrc)
 {
     struct ReachabilityCollector_pvt* rcp = Identity_check((struct ReachabilityCollector_pvt*) vrc);
+    if (rcp->msgOnWire) { return; }
     mkNextRequest(rcp);
-}
-
-struct ReachabilityCollector_PeerInfo*
-    ReachabilityCollector_getPeerInfo(struct ReachabilityCollector* rc, int peerNum)
-{
-    struct ReachabilityCollector_pvt* rcp = Identity_check((struct ReachabilityCollector_pvt*) rc);
-    struct PeerInfo_pvt* pi = ArrayList_OfPeerInfo_pvt_get(rcp->piList, peerNum);
-    return pi ? &pi->pub : NULL;
 }
 
 struct ReachabilityCollector* ReachabilityCollector_new(struct Allocator* allocator,
@@ -215,7 +195,7 @@ struct ReachabilityCollector* ReachabilityCollector_new(struct Allocator* alloca
     rcp->myAddr = myAddr;
     rcp->msgCore = msgCore;
     rcp->alloc = alloc;
-    rcp->piList = ArrayList_OfPeerInfo_pvt_new(alloc);
+    rcp->piList = ArrayList_OfPeerInfo_new(alloc);
     rcp->log = log;
     rcp->br = br;
     Identity_set(rcp);
