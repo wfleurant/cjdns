@@ -113,7 +113,7 @@ getNode() {
     local march="$MARCH";
     [ "$march" = "x86_64" ] && march="x64";
     [ "$march" = "armv6l" ] && march="arm-pi";
-    [ "$march" = "armv7l" ] && march="arm-pi";
+    [ "$march" = "armv7l" ] && march="armv7l";
     NODEURL="http://nodejs.org/dist/$DLVER/node-$DLVER-$PLATFORM-$march.tar.gz";
     [ "$NODEHASH" = "" ] && getNodeHash;
     [ "$NODEHASH" = "" ] && printf '%s\n%s\n' \
