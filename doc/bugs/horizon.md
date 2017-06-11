@@ -24,6 +24,7 @@ The **Horizon** bug is one that we knew was coming, but now we've officially sta
 Naturally, we can approach the problem from a few angles, so whatever your skill set is, there's likely something that you can do to help.
 
 1. help rewrite the parts of cjdns which encode the paths such that a variable number of bits can be used
+1.1. Probably less code is needed than it first seems... If the final representation is a stack of 64 bit labels, many places in the code will still work with 64 bits quite happily.
 2. use the admin interface to figure out which parts of the network your node can see, and compare those results against a wider view of the network, so we can identify our blind spots
 3. evaluate your peering choices, and try to drop bad peers and pick good ones, so that we can continue to have a functional network in the meantime (we're still quite likely to have lots of paths that are out of reach, so we'll still be able to debug this issue, don't worry)
 4. talk to your friends about cjdns, and get them to join the network, so we have more opportunity to find long _shortest-paths_ to any particular node (see, you don't even need to know how to code!)

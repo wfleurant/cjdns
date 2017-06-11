@@ -330,7 +330,7 @@ static struct sock_fprog* mkFilter(struct Allocator* alloc, struct Except* eh)
         // Security_nofiles
         IFEQ(__NR_setrlimit, success),
 
-        // for ETHInterface_listDevices (netlinkk)
+        // for ETHInterface_listDevices (netlink)
         #ifdef __NR_bind
         IFEQ(__NR_bind, bind_netlink),
         #endif
