@@ -61,19 +61,7 @@ struct SessionManager
     int64_t sessionTimeoutMilliseconds;
 
     /**
-     * Should be set to a number less than sessionSearchAfterMilliseconds, if no incoming nor
-     * outgoing messages were sent on this session for this amount of time, re-running of the
-     * search will be skipped when sessionSearchAfterMilliseconds is reached allowing the session
-     * to be removed from the table after sessionTimeoutMilliseconds.
-     */
-    #define SessionManager_SESSION_IDLE_AFTER_MILLISECONDS_DEFAULT 15000
-    int64_t sessionIdleAfterMilliseconds;
-
-    /**
      * Number of milliseconds after which a new DHT search will be run to verify the path.
-     * If the session is in "idle" state (sessionIdleAfterMilliseconds has elapsed without any
-     * incoming or outgoing traffic) then the search will be skipped, although it will be triggered
-     * again if more traffic is sent.
      * This is guaged off of lastSearchTime so it need not be less than sessionTimeoutMilliseconds
      * which is guaged off of time of last incoming message (timeOfLastIn).
      */
@@ -85,10 +73,16 @@ struct SessionManager_Session
 {
     struct CryptoAuth_Session* caSession;
 
-    /** When the last message was received on this session (milliseconds since epoch). */
+    /**
+     * When the last message was received on this session (milliseconds since epoch).
+     * Used for session keep alive.
+     */
+    int64_t timeOfKeepAliveIn;
+
+    /** When the last non-CJDHT message was received on this session (milliseconds since epoch). */
     int64_t timeOfLastIn;
 
-    /** When the last message was sent on this session (milliseconds since epoch). */
+    /** When the last non-CJDHT message was sent on this session (milliseconds since epoch). */
     int64_t timeOfLastOut;
 
     uint64_t bytesOut;
@@ -106,6 +100,8 @@ struct SessionManager_Session
 
     /** The version of the other node. */
     uint32_t version;
+
+    uint32_t metric;
 
     /** The best known switch label for reaching this node. */
     uint64_t sendSwitchLabel;

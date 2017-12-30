@@ -23,10 +23,10 @@
 #include "crypto/AddressCalc.h"
 #include "crypto/random/Random.h"
 #include "crypto/random/libuv/LibuvEntropyProvider.h"
-#ifdef SUBNODE
 #include "subnode/SubnodePathfinder.h"
 #include "subnode/SupernodeHunter_admin.h"
-#else
+#include "subnode/ReachabilityCollector_admin.h"
+#ifndef SUBNODE
 #include "dht/Pathfinder.h"
 #endif
 #include "exception/Jmp.h"
@@ -142,7 +142,7 @@ static void sendResponse(String* error,
                          struct Allocator* tempAlloc)
 {
     Dict* output = Dict_new(tempAlloc);
-    Dict_putString(output, String_CONST("error"), error, tempAlloc);
+    Dict_putStringC(output, "error", error, tempAlloc);
     Admin_sendMessage(output, txid, admin);
 }
 
@@ -177,8 +177,8 @@ static void initTunfd(Dict* args, void* vcontext, String* txid, struct Allocator
     struct Context* ctx = Identity_check((struct Context*) vcontext);
     struct Jmp jmp;
     Jmp_try(jmp) {
-        int64_t* tunfd = Dict_getInt(args, String_CONST("tunfd"));
-        int64_t* tuntype = Dict_getInt(args, String_CONST("type"));
+        int64_t* tunfd = Dict_getIntC(args, "tunfd");
+        int64_t* tuntype = Dict_getIntC(args, "type");
         if (!tunfd || *tunfd < 0) {
             String* error = String_printf(requestAlloc, "Invalid tunfd");
             sendResponse(error, ctx->admin, txid, requestAlloc);
@@ -209,8 +209,8 @@ static void initTunnel(Dict* args, void* vcontext, String* txid, struct Allocato
 
     struct Jmp jmp;
     Jmp_try(jmp) {
-        String* desiredName = Dict_getString(args, String_CONST("desiredTunName"));
-        initTunnel2(desiredName, ctx, 8, &jmp.handler);
+        String* desiredName = Dict_getStringC(args, "desiredTunName");
+        initTunnel2(desiredName, ctx, AddressCalc_ADDRESS_PREFIX_BITS, &jmp.handler);
     } Jmp_catch {
         String* error = String_printf(requestAlloc, "Failed to configure tunnel [%s]", jmp.message);
         sendResponse(error, ctx->admin, txid, requestAlloc);
@@ -261,18 +261,20 @@ void Core_init(struct Allocator* alloc,
     struct EncodingScheme* encodingScheme = NumberCompress_defineScheme(alloc);
 
     // The link between the Pathfinder and the core needs to be asynchronous.
-    #ifdef SUBNODE
-        struct SubnodePathfinder* pf = SubnodePathfinder_new(
-            alloc, logger, eventBase, rand, nc->myAddress, privateKey, encodingScheme);
-    #else
-        struct Pathfinder* pf = Pathfinder_register(alloc, logger, eventBase, rand, admin);
+    struct SubnodePathfinder* spf = SubnodePathfinder_new(
+        alloc, logger, eventBase, rand, nc->myAddress, privateKey, encodingScheme);
+    struct ASynchronizer* spfAsync = ASynchronizer_new(alloc, eventBase, logger);
+    Iface_plumb(&spfAsync->ifA, &spf->eventIf);
+    EventEmitter_regPathfinderIface(nc->ee, &spfAsync->ifB);
+
+    #ifndef SUBNODE
+        struct Pathfinder* opf = Pathfinder_register(alloc, logger, eventBase, rand, admin);
+        struct ASynchronizer* opfAsync = ASynchronizer_new(alloc, eventBase, logger);
+        Iface_plumb(&opfAsync->ifA, &opf->eventIf);
+        EventEmitter_regPathfinderIface(nc->ee, &opfAsync->ifB);
     #endif
-    struct ASynchronizer* pfAsync = ASynchronizer_new(alloc, eventBase, logger);
-    Iface_plumb(&pfAsync->ifA, &pf->eventIf);
-    EventEmitter_regPathfinderIface(nc->ee, &pfAsync->ifB);
-    #ifdef SUBNODE
-        SubnodePathfinder_start(pf);
-    #endif
+
+    SubnodePathfinder_start(spf);
 
     // ------------------- Register RPC functions ----------------------- //
     UpperDistributor_admin_register(nc->upper, admin, alloc);
@@ -285,9 +287,8 @@ void Core_init(struct Allocator* alloc,
 #endif
     FileNo_admin_register(admin, alloc, eventBase, logger, eh);
 
-#ifdef SUBNODE
-    SupernodeHunter_admin_register(pf->snh, admin, alloc);
-#endif
+    SupernodeHunter_admin_register(spf->snh, admin, alloc);
+    ReachabilityCollector_admin_register(spf->rc, admin, alloc);
 
     AuthorizedPasswords_init(admin, nc->ca, alloc);
     Admin_registerFunction("ping", adminPing, admin, false, NULL, admin);
@@ -357,10 +358,10 @@ int Core_main(int argc, char** argv)
     Log_debug(logger, "Finished getting pre-configuration from client");
     Dict* config = BencMessageReader_read(preConf, tempAlloc, eh);
 
-    String* privateKeyHex = Dict_getString(config, String_CONST("privateKey"));
-    Dict* adminConf = Dict_getDict(config, String_CONST("admin"));
-    String* pass = Dict_getString(adminConf, String_CONST("pass"));
-    String* bind = Dict_getString(adminConf, String_CONST("bind"));
+    String* privateKeyHex = Dict_getStringC(config, "privateKey");
+    Dict* adminConf = Dict_getDictC(config, "admin");
+    String* pass = Dict_getStringC(adminConf, "pass");
+    String* bind = Dict_getStringC(adminConf, "bind");
     if (!(pass && privateKeyHex && bind)) {
         if (!pass) {
             Except_throw(eh, "Expected 'pass'");
@@ -393,8 +394,8 @@ int Core_main(int argc, char** argv)
     struct Admin* admin = Admin_new(&udpAdmin->generic, logger, eventBase, pass);
 
     // --------------------- Setup the Logger --------------------- //
-    Dict* logging = Dict_getDict(config, String_CONST("logging"));
-    String* logTo = Dict_getString(logging, String_CONST("logTo"));
+    Dict* logging = Dict_getDictC(config, "logging");
+    String* logTo = Dict_getStringC(logging, "logTo");
     if (logTo && String_equals(logTo, String_CONST("stdout"))) {
         // do nothing, continue logging to stdout.
     } else {
